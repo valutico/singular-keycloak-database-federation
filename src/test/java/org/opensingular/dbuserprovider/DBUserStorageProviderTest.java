@@ -4,8 +4,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.component.ComponentModel;
-import org.keycloak.models.*;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.UserProvider;
+import org.keycloak.storage.federated.UserFederatedStorageProvider;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.opensingular.dbuserprovider.model.QueryConfigurations;
@@ -18,10 +24,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +49,11 @@ class DBUserStorageProviderTest {
     @Mock
     private RealmModel realm;
     @Mock
-    private UserLocalStorageProvider userLocalStorageProvider;
+    private UserProvider userLocalStorageProvider;
+    @Mock
+    private UserFederatedStorageProvider userFederatedStorageProvider;
+    @Mock
+    private javax.sql.DataSource dataSource;
     @Mock
     private Connection connection;
     @Mock
@@ -52,7 +63,7 @@ class DBUserStorageProviderTest {
     @Mock
     private ResultSetMetaData resultSetMetaData;
 
-    private DBUserStorageProvider provider;
+    private DBUserStorageProvider provider; // Will be initialized in each test
 
     private final String testUsername = "testuser";
     private final String testUserEmail = "testuser@example.com";
@@ -64,41 +75,51 @@ class DBUserStorageProviderTest {
     void setUp() throws SQLException {
         lenient().when(model.getId()).thenReturn("test-component-id");
         lenient().when(session.userLocalStorage()).thenReturn(userLocalStorageProvider);
+        lenient().when(session.userFederatedStorage()).thenReturn(userFederatedStorageProvider);
+        lenient().when(userFederatedStorageProvider.getAttributes(any(RealmModel.class), anyString())).thenReturn(new MultivaluedHashMap<>());
 
-        // Mock QueryConfigurations
+        // Default QueryConfigurations, can be overridden in tests BEFORE provider instantiation
         lenient().when(queryConfigurations.getFindByUsername()).thenReturn("SELECT * FROM users WHERE username = ?");
-        lenient().when(queryConfigurations.getRDBMS()).thenReturn(RDBMS.POSTGRES); // Or any other non-Oracle for simple query execution path
+        lenient().when(queryConfigurations.getRDBMS()).thenReturn(RDBMS.POSTGRESQL);
+        lenient().when(queryConfigurations.getAllowDatabaseToOverwriteKeycloak()).thenReturn(false);
+        // Default sync/unlink to false, tests must explicitly enable them
+        lenient().when(queryConfigurations.isSyncEnabled()).thenReturn(false);
+        lenient().when(queryConfigurations.isUnlinkEnabled()).thenReturn(false);
 
-        // Mock DataSourceProvider and JDBC chain
-        lenient().when(dataSourceProvider.getConnection()).thenReturn(connection);
+
+        // Mock DataSourceProvider and JDBC chain (common for all tests)
+        lenient().when(dataSourceProvider.getDataSource()).thenReturn(Optional.of(dataSource));
+        lenient().when(dataSource.getConnection()).thenReturn(connection);
         lenient().when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         lenient().when(preparedStatement.executeQuery()).thenReturn(resultSet);
         lenient().when(resultSet.getMetaData()).thenReturn(resultSetMetaData);
 
-        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
+        // Provider is NOT instantiated here anymore. Each test will do it.
     }
 
     private void mockDbUserFound(Map<String, String> userData) throws SQLException {
-        when(resultSet.next()).thenReturn(true).thenReturn(false); // Simulate one row found
+        when(resultSet.next()).thenReturn(true).thenReturn(false);
         when(resultSetMetaData.getColumnCount()).thenReturn(userData.size());
 
         int i = 1;
         for (Map.Entry<String, String> entry : userData.entrySet()) {
             lenient().when(resultSetMetaData.getColumnLabel(i)).thenReturn(entry.getKey());
             lenient().when(resultSet.getString(i)).thenReturn(entry.getValue());
-            lenient().when(resultSet.getString(entry.getKey())).thenReturn(entry.getValue()); // Allow access by label
+            lenient().when(resultSet.getString(entry.getKey())).thenReturn(entry.getValue());
             i++;
         }
     }
 
     private void mockDbUserNotFound() throws SQLException {
-        when(resultSet.next()).thenReturn(false); // Simulate no user found
+        when(resultSet.next()).thenReturn(false);
     }
 
     @Test
     @DisplayName("Sync new user when sync is enabled")
     void testSyncNewUser_SyncEnabled() throws SQLException {
         when(queryConfigurations.isSyncEnabled()).thenReturn(true);
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
+
 
         Map<String, String> dbUserData = new HashMap<>();
         dbUserData.put("id", testUserId);
@@ -108,38 +129,42 @@ class DBUserStorageProviderTest {
         dbUserData.put("lastName", testUserLastName);
         mockDbUserFound(dbUserData);
 
-        when(userLocalStorageProvider.getUserByUsername(realm, testUsername)).thenReturn(null); // No local user
-        UserModel newLocalUser = mock(UserModel.class); // This is the user created by Keycloak
+        when(userLocalStorageProvider.getUserByUsername(realm, testUsername)).thenReturn(null);
+        UserModel newLocalUser = mock(UserModel.class);
         when(userLocalStorageProvider.addUser(realm, testUsername)).thenReturn(newLocalUser);
 
         UserModel result = provider.getUserByUsername(testUsername, realm);
 
         assertNotNull(result);
-        assertEquals(newLocalUser, result); // Should be the Keycloak-managed user model
+        assertEquals(newLocalUser, result);
         verify(userLocalStorageProvider).addUser(realm, testUsername);
         verify(newLocalUser).setFirstName(testUserFirstName);
         verify(newLocalUser).setLastName(testUserLastName);
         verify(newLocalUser).setEmail(testUserEmail);
-        verify(newLocalUser).setFederationLink(model.getId() + "." + testUserId); // Check federation link
+
+        ArgumentCaptor<String> federationLinkCaptor = ArgumentCaptor.forClass(String.class);
+        verify(newLocalUser).setFederationLink(federationLinkCaptor.capture());
+        assertEquals("f:" + model.getId() + ":" + testUserId, federationLinkCaptor.getValue());
     }
 
     @Test
     @DisplayName("Sync existing user when sync is enabled")
     void testSyncExistingUser_SyncEnabled() throws SQLException {
         when(queryConfigurations.isSyncEnabled()).thenReturn(true);
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
+
         String updatedEmail = "updatedemail@example.com";
 
         Map<String, String> dbUserData = new HashMap<>();
         dbUserData.put("id", testUserId);
         dbUserData.put("username", testUsername);
-        dbUserData.put("email", updatedEmail); // Email is different from original local user
+        dbUserData.put("email", updatedEmail);
         dbUserData.put("firstName", testUserFirstName);
         dbUserData.put("lastName", testUserLastName);
         mockDbUserFound(dbUserData);
 
         UserModel existingLocalUser = mock(UserModel.class);
-        when(existingLocalUser.getUsername()).thenReturn(testUsername);
-        //when(existingLocalUser.getEmail()).thenReturn(testUserEmail); // Original email
+        // when(existingLocalUser.getUsername()).thenReturn(testUsername); // Removed unnecessary stubbing
         when(userLocalStorageProvider.getUserByUsername(realm, testUsername)).thenReturn(existingLocalUser);
 
         UserModel result = provider.getUserByUsername(testUsername, realm);
@@ -147,15 +172,16 @@ class DBUserStorageProviderTest {
         assertNotNull(result);
         assertEquals(existingLocalUser, result);
         verify(userLocalStorageProvider, never()).addUser(any(RealmModel.class), anyString());
-        verify(existingLocalUser).setEmail(updatedEmail); // Verify email update
-        verify(existingLocalUser).setFirstName(testUserFirstName); // Should still set other attributes
+        verify(existingLocalUser).setEmail(updatedEmail);
+        verify(existingLocalUser).setFirstName(testUserFirstName);
         verify(existingLocalUser).setLastName(testUserLastName);
     }
 
     @Test
     @DisplayName("Sync disabled, user found in DB")
     void testSyncDisabled_UserFoundInDB() throws SQLException {
-        when(queryConfigurations.isSyncEnabled()).thenReturn(false);
+        when(queryConfigurations.isSyncEnabled()).thenReturn(false); // Explicitly false
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
 
         Map<String, String> dbUserData = new HashMap<>();
         dbUserData.put("id", testUserId);
@@ -170,7 +196,6 @@ class DBUserStorageProviderTest {
         assertEquals(testUsername, result.getUsername());
         assertEquals(testUserEmail, result.getEmail());
 
-        // Verify no interaction with local storage for adding/updating
         verify(userLocalStorageProvider, never()).getUserByUsername(any(RealmModel.class), anyString());
         verify(userLocalStorageProvider, never()).addUser(any(RealmModel.class), anyString());
     }
@@ -180,6 +205,7 @@ class DBUserStorageProviderTest {
     @DisplayName("User not found in external DB")
     void testUserNotFoundInDB() throws SQLException {
         when(queryConfigurations.isSyncEnabled()).thenReturn(true); // Sync status shouldn't matter if user not in DB
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
         mockDbUserNotFound();
 
         UserModel result = provider.getUserByUsername(testUsername, realm);
@@ -194,6 +220,7 @@ class DBUserStorageProviderTest {
     @DisplayName("Unlink user when unlinking is enabled")
     void testUnlinkUser_UnlinkEnabled() {
         when(queryConfigurations.isUnlinkEnabled()).thenReturn(true);
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
         UserModel mockUser = mock(UserModel.class);
         when(mockUser.getFederationLink()).thenReturn("some-link"); // User is currently linked
 
@@ -207,6 +234,7 @@ class DBUserStorageProviderTest {
     @DisplayName("Unlink user when unlinking is disabled")
     void testUnlinkUser_UnlinkDisabled() {
         when(queryConfigurations.isUnlinkEnabled()).thenReturn(false);
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
         UserModel mockUser = mock(UserModel.class);
         // No need to mock getFederationLink as it shouldn't be called if unlinking is disabled early.
 
@@ -220,6 +248,7 @@ class DBUserStorageProviderTest {
     @DisplayName("Unlink user who is already unlinked")
     void testUnlinkUser_AlreadyUnlinked() {
         when(queryConfigurations.isUnlinkEnabled()).thenReturn(true);
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
         UserModel mockUser = mock(UserModel.class);
         when(mockUser.getFederationLink()).thenReturn(null); // User is already unlinked
 
@@ -233,6 +262,7 @@ class DBUserStorageProviderTest {
     @DisplayName("Sync new user with multiple attributes when sync is enabled")
     void testSyncNewUser_MultipleAttributes_SyncEnabled() throws SQLException {
         when(queryConfigurations.isSyncEnabled()).thenReturn(true);
+        provider = new DBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations);
 
         Map<String, String> dbUserData = new HashMap<>();
         dbUserData.put("id", testUserId);

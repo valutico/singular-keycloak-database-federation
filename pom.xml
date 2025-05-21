@@ -10,6 +10,33 @@
     <groupId>org.opensingular</groupId>
     <version>2.4.6</version>
 
+    <properties>
+        <keycloak.version>17.0.1</keycloak.version>
+        <jboss-logging.version>3.4.1.Final</jboss-logging.version>
+        <lombok.version>1.18.30</lombok.version>
+        <auto-service.version>1.1.1</auto-service.version>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <mockito.version>5.10.0</mockito.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.google.auto.service</groupId>
+                <artifactId>auto-service</artifactId>
+                <version>${auto-service.version}</version>
+                <optional>true</optional>
+            </dependency>
+            <dependency>
+                <groupId>com.google.auto.service</groupId>
+                <artifactId>auto-service-annotations</artifactId>
+                <version>${auto-service.version}</version>
+                <optional>true</optional>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>org.keycloak</groupId>
