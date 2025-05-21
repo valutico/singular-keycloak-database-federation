@@ -5,12 +5,12 @@ import org.apache.commons.lang3.StringUtils;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel; // Import UserModel
+import org.keycloak.models.UserModel; 
+import org.keycloak.models.UserCredentialManager;
 import org.keycloak.storage.StorageId;
-import org.keycloak.storage.adapter.AbstractUserAdapterFederatedStorage;
 
 import java.util.Collections;
-import java.util.HashMap; // Import HashMap
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -19,14 +19,24 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @JBossLog
-public class UserAdapter extends AbstractUserAdapterFederatedStorage {
+public class UserAdapter implements UserModel {
 
     private final String keycloakId;
     private String username;
-    private final Map<String, List<String>> attributesFromData; // Store attributes from constructor
+    private final KeycloakSession session;
+    private final RealmModel realm;
+    private final ComponentModel model;
+    private final Map<String, List<String>> attributesFromData; 
+    
+    @Override
+    public UserCredentialManager credentialManager() {
+        return session.userCredentialManager();
+    }
 
     public UserAdapter(KeycloakSession session, RealmModel realm, ComponentModel model, Map<String, String> data, boolean allowDatabaseToOverwriteKeycloak) {
-        super(session, realm, model);
+        this.session = session;
+        this.realm = realm;
+        this.model = model;
         this.keycloakId = StorageId.keycloakId(model, data.get("id"));
         this.username = data.get("username");
         this.attributesFromData = new HashMap<>();
@@ -38,15 +48,10 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
             }
         }
 
-        // The original logic for merging with existing attributes if needed (during sync)
-        // For a newly created adapter directly from DB data, this.getAttributes() from super
-        // might be problematic if the user isn't "fully" in Keycloak's context yet.
-        // The syncUser method in DBUserStorageProvider should handle setting attributes on the *local* Keycloak user.
-        // This adapter primarily represents the DB state.
         log.debugv("UserAdapter created for username: {0} with attributes: {1}", this.username, this.attributesFromData);
     }
 
-
+    // Basic UserModel methods
     @Override
     public String getId() {
         return keycloakId;
@@ -60,7 +65,7 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
     @Override
     public void setUsername(String username) {
         this.username = username;
-        this.attributesFromData.put(UserModel.USERNAME, Collections.singletonList(username)); // Keep attributes map in sync
+        this.attributesFromData.put(UserModel.USERNAME, Collections.singletonList(username));
     }
 
     @Override
@@ -103,19 +108,10 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
         setSingleAttribute(UserModel.EMAIL_VERIFIED, String.valueOf(verified));
     }
 
-    // Override attribute methods to use attributesFromData as the source of truth
-    // for this adapter, falling back to super.getAttributes() if needed,
-    // or deciding how to merge/prioritize.
-
+    // Attribute methods
     @Override
     public Map<String, List<String>> getAttributes() {
-        // Return a mutable copy if further modifications are expected by callers,
-        // or an immutable one if this adapter's state is fixed after creation.
-        // For now, let's return a copy of what we have.
-        // Super.getAttributes() might try to load from federated storage, which could be what we want to avoid initially.
-        Map<String, List<String>> allAttributes = new HashMap<>(super.getAttributes()); // Get attributes from federated storage
-        allAttributes.putAll(this.attributesFromData); // Overlay with data from DB
-        return allAttributes;
+        return new HashMap<>(this.attributesFromData);
     }
 
     @Override
@@ -123,7 +119,7 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
         if (this.attributesFromData.containsKey(name)) {
             return this.attributesFromData.get(name);
         }
-        return super.getAttribute(name);
+        return Collections.emptyList();
     }
     
     @Override
@@ -135,7 +131,6 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
         return list.get(0);
     }
 
-
     @Override
     public void setSingleAttribute(String name, String value) {
         if (value == null) {
@@ -143,7 +138,6 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
         } else {
             this.attributesFromData.put(name, Collections.singletonList(value));
         }
-        super.setSingleAttribute(name, value); // also update federated storage
     }
 
     @Override
@@ -153,12 +147,57 @@ public class UserAdapter extends AbstractUserAdapterFederatedStorage {
         } else {
             this.attributesFromData.put(name, values);
         }
-        super.setAttribute(name, values); // also update federated storage
     }
 
     @Override
     public void removeAttribute(String name) {
         this.attributesFromData.remove(name);
-        super.removeAttribute(name); // also update federated storage
+    }
+
+    // Required methods for Keycloak 24
+    @Override
+    public Set<String> getRequiredActions() {
+        return Collections.emptySet();
+    }
+
+    @Override
+    public void addRequiredAction(String action) {
+        // Not implemented - federated storage doesn't support this
+    }
+
+    @Override
+    public void removeRequiredAction(String action) {
+        // Not implemented - federated storage doesn't support this
+    }
+
+    @Override
+    public RealmModel getRealm() {
+        return realm;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        String enabled = getFirstAttribute(UserModel.ENABLED);
+        return enabled == null || Boolean.parseBoolean(enabled);
+    }
+
+    @Override
+    public void setEnabled(boolean enabled) {
+        setSingleAttribute(UserModel.ENABLED, String.valueOf(enabled));
+    }
+
+    @Override
+    public Long getCreatedTimestamp() {
+        String timestamp = getFirstAttribute(UserModel.CREATED_TIMESTAMP);
+        return timestamp != null ? Long.valueOf(timestamp) : null;
+    }
+
+    @Override
+    public void setCreatedTimestamp(Long timestamp) {
+        if (timestamp == null) {
+            removeAttribute(UserModel.CREATED_TIMESTAMP);
+        } else {
+            setSingleAttribute(UserModel.CREATED_TIMESTAMP, timestamp.toString());
+        }
     }
 }

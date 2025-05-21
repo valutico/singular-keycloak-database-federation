@@ -5,7 +5,6 @@ import org.keycloak.component.ComponentModel;
 import org.keycloak.credential.CredentialInput;
 import org.keycloak.credential.CredentialInputUpdater;
 import org.keycloak.credential.CredentialInputValidator;
-import org.keycloak.models.cache.CachedUserModel;
 import org.keycloak.models.*;
 import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.storage.StorageId;
@@ -26,8 +25,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @JBossLog
-public class DBUserStorageProvider implements UserStorageProvider,
-                                              UserLookupProvider, UserQueryProvider, CredentialInputUpdater, CredentialInputValidator, UserRegistrationProvider {
+public class DBUserStorageProvider implements 
+                                            UserStorageProvider,
+                                            UserLookupProvider, 
+                                            UserQueryProvider, 
+                                            CredentialInputUpdater, 
+                                            CredentialInputValidator, 
+                                            UserRegistrationProvider {
     
     private final KeycloakSession session;
     private final ComponentModel  model;
@@ -54,12 +58,14 @@ public class DBUserStorageProvider implements UserStorageProvider,
             return userAdapter;
         }
 
-        UserModel localUser = session.userLocalStorage().getUserByUsername(realm, username);
+        // In Keycloak 24, use RealmManager.getLocalUsers() instead of session.userLocalStorage()
+        UserProvider userProvider = session.users();
+        UserModel localUser = userProvider.getUserByUsername(realm, username);
 
         if (localUser == null) {
             log.infov("User not found locally, creating new local user: {0}", username);
             try {
-                localUser = session.userLocalStorage().addUser(realm, username);
+                localUser = userProvider.addUser(realm, username);
                 localUser.setFederationLink(userAdapter.getId()); // Link to the federated user
                 localUser.setFirstName(userAdapter.getFirstName());
                 localUser.setLastName(userAdapter.getLastName());
@@ -69,8 +75,6 @@ public class DBUserStorageProvider implements UserStorageProvider,
                 for (Map.Entry<String, List<String>> attribute : userAdapter.getAttributes().entrySet()) {
                     localUser.setAttribute(attribute.getKey(), attribute.getValue());
                 }
-                // Add any required actions if necessary, e.g.,
-                // localUser.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
                 log.infov("Successfully created local user: {0}", username);
             } catch (Exception e) {
                 log.errorv(e, "Error creating local user: {0}", username);
@@ -125,28 +129,45 @@ public class DBUserStorageProvider implements UserStorageProvider,
         
         log.infov("isValid user credential: userId={0}", user.getId());
         
-        if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) {
+        if (!supportsCredentialType(input.getType())) {
             return false;
         }
         
-        UserCredentialModel cred = (UserCredentialModel) input;
+        String password = input.getChallengeResponse();
 
         UserModel dbUser = user;
-        // If the cache just got loaded in the last 500 millisec (i.e. probably part of the actual flow), there is no point in reloading the user.)
-        if (allowDatabaseToOverwriteKeycloak && user instanceof CachedUserModel && (System.currentTimeMillis() - ((CachedUserModel) user).getCacheTimestamp()) > 500) {
+        // If allowDatabaseToOverwriteKeycloak is enabled, we'll check if we need to reload the user from the database
+        if (allowDatabaseToOverwriteKeycloak) {
           dbUser = this.getUserById(user.getId(), realm);
 
           if (dbUser == null) {
-            ((CachedUserModel) user).invalidate();
+            // Invalidate cache using UserCache
+            try {
+                // In Keycloak 24, we need to get the UserCache from the session's provider
+                UserCache userCache = session.getProvider(UserCache.class);
+                if (userCache != null) {
+                    userCache.evict(realm, user);
+                }
+            } catch (Exception e) {
+                log.warnv("Error evicting user from cache: {0}", e.getMessage());
+            }
             return false;
           }
 
-          // For now, we'll just invalidate the cache if username or email has changed. Eventually we could check all (or a parametered list of) attributes fetched from the DB.
+          // For now, we'll just invalidate the cache if username or email has changed.
           if (!java.util.Objects.equals(user.getUsername(), dbUser.getUsername()) || !java.util.Objects.equals(user.getEmail(), dbUser.getEmail())) {
-            ((CachedUserModel) user).invalidate();
+            try {
+                // In Keycloak 24, we need to get the UserCache from the session's provider
+                UserCache userCache = session.getProvider(UserCache.class);
+                if (userCache != null) {
+                    userCache.evict(realm, user);
+                }
+            } catch (Exception e) {
+                log.warnv("Error evicting user from cache: {0}", e.getMessage());
+            }
           }
         }
-        return repository.validateCredentials(dbUser.getUsername(), cred.getChallengeResponse());
+        return repository.validateCredentials(dbUser.getUsername(), password);
     }
     
     @Override
@@ -154,16 +175,17 @@ public class DBUserStorageProvider implements UserStorageProvider,
         
         log.infov("updating credential: realm={0} user={1}", realm.getId(), user.getUsername());
         
-        if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) {
+        if (!supportsCredentialType(input.getType())) {
             return false;
         }
         
-        UserCredentialModel cred = (UserCredentialModel) input;
-        return repository.updateCredentials(user.getUsername(), cred.getChallengeResponse());
+        String password = input.getChallengeResponse();
+        return repository.updateCredentials(user.getUsername(), password);
     }
     
     @Override
     public void disableCredentialType(RealmModel realm, UserModel user, String credentialType) {
+        // No-op - credential types cannot be disabled in this provider
     }
     
     @Override
@@ -173,19 +195,16 @@ public class DBUserStorageProvider implements UserStorageProvider,
     
     @Override
     public void preRemove(RealmModel realm) {
-        
         log.infov("pre-remove realm");
     }
     
     @Override
     public void preRemove(RealmModel realm, GroupModel group) {
-        
         log.infov("pre-remove group");
     }
     
     @Override
     public void preRemove(RealmModel realm, RoleModel role) {
-        
         log.infov("pre-remove role");
     }
     
@@ -232,12 +251,10 @@ public class DBUserStorageProvider implements UserStorageProvider,
     @Override
     public UserModel getUserByEmail(String email, RealmModel realm) {
         
-        log.infov("lookup user by email: realm={0} email={1}", realm.getId(), email); // Log corrected to email
+        log.infov("lookup user by email: realm={0} email={1}", realm.getId(), email);
         
-        // Assuming getUserByUsername can also find by email if the DB query is configured that way,
-        // or if username and email are the same. If not, this might need adjustment
-        // to call a specific repository.findUserByEmail if available.
-        UserModel userAdapter = repository.findUserByUsername(email) // This might need to be repository.findUserByEmail(email)
+        // Using the findUserByUsername method as a fallback - adapt this if your repository has a dedicated findUserByEmail method
+        UserModel userAdapter = repository.findUserByUsername(email)
                                 .map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak))
                                 .orElse(null);
         if (userAdapter != null) {
@@ -333,7 +350,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
     
     @Override
     public List<UserModel> getGroupMembers(RealmModel realm, GroupModel group) {
-        log.infov("search for group members: realm={0} groupId={1} firstResult={2} maxResults={3}", realm.getId(), group.getId());
+        log.infov("search for group members: realm={0} groupId={1}", realm.getId(), group.getId());
         return Collections.emptyList();
     }
     
@@ -343,13 +360,11 @@ public class DBUserStorageProvider implements UserStorageProvider,
         return Collections.emptyList();
     }
     
-    
     @Override
     public UserModel addUser(RealmModel realm, String username) {
         // from documentation: "If your provider has a configuration switch to turn off adding a user, returning null from this method will skip the provider and call the next one."
         return null;
     }
-    
     
     @Override
     public boolean removeUser(RealmModel realm, UserModel user) {
