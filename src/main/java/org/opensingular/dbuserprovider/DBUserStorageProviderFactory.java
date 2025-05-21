@@ -20,6 +20,7 @@ import java.util.Map;
 
 @JBossLog
 @AutoService(UserStorageProviderFactory.class)
+@SuppressWarnings("rawtypes") // Added to suppress AutoService warning
 public class DBUserStorageProviderFactory implements UserStorageProviderFactory<DBUserStorageProvider> {
     
     private static final String PARAMETER_PLACEHOLDER_HELP = "Use '?' as parameter placeholder character (replaced only once). ";
