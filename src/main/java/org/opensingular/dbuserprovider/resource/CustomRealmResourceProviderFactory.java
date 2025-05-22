@@ -3,8 +3,8 @@ package org.opensingular.dbuserprovider.resource;
 import org.keycloak.Config;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.services.resources.RealmResourceProvider;
-import org.keycloak.services.resources.RealmResourceProviderFactory;
+import org.keycloak.services.resource.RealmResourceProvider; // Corrected import
+import org.keycloak.services.resource.RealmResourceProviderFactory; // Corrected import
 
 public class CustomRealmResourceProviderFactory implements RealmResourceProviderFactory {
 

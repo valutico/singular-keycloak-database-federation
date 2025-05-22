@@ -13,6 +13,7 @@ import org.keycloak.storage.UserStorageProviderFactory;
 import org.opensingular.dbuserprovider.model.QueryConfigurations;
 import org.opensingular.dbuserprovider.persistence.DataSourceProvider;
 import org.opensingular.dbuserprovider.persistence.RDBMS;
+import org.opensingular.dbuserprovider.persistence.UserRepository;
 
 import java.util.HashMap;
 import java.util.List;
@@ -84,7 +85,7 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
     @Override
     public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model) throws ComponentValidationException {
         try {
-            ProviderConfig old = providerConfigPerInstance.put(model.getId(), configure(model));
+            ProviderConfig old = providerConfigPerInstance.put(model.getId(), configure(model, session)); // Corrected line
             if (old != null) {
                 old.dataSourceProvider.close();
             }

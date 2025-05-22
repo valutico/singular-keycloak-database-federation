@@ -8,6 +8,7 @@ import org.keycloak.credential.CredentialInputValidator;
 import org.keycloak.models.cache.CachedUserModel;
 import org.keycloak.models.*;
 import org.keycloak.models.credential.PasswordCredentialModel;
+import org.keycloak.credential.UserCredentialManager;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.user.UserLookupProvider;
@@ -159,8 +160,24 @@ public class DBUserStorageProvider implements UserStorageProvider,
             if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) {
                  return false;
             }
-            // Delegate to Keycloak's default mechanism for local users
-            return session.userCredentialManager().updateCredential(realm, user, input);
+            UserCredentialModel cred = (UserCredentialModel) input;
+            if (cred.getType() == null) {
+                cred.setType(PasswordCredentialModel.TYPE);
+            }
+            if (cred.getValue() == null) {
+                return false;
+            }
+            if (cred.getValue().isEmpty()) {
+                return false;
+            }
+            if (cred.getType() == null) {
+                cred.setType(PasswordCredentialModel.TYPE);
+            }
+            //update password in local storage
+            session.userCredentialManager().updateCredential(realm, user, cred);
+
+            return false;
+            //return session.userCredentialManager().updateCredential(realm, user, input);
         } else {
             // User is federated, maintain existing behavior
             log.infov("Attempting credential update for federated user: realm={0} user={1}", realm.getId(), user.getUsername());
