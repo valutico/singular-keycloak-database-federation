@@ -20,7 +20,6 @@ import java.util.Map;
 
 @JBossLog
 @AutoService(UserStorageProviderFactory.class)
-@SuppressWarnings("rawtypes") // Added to suppress AutoService warning
 public class DBUserStorageProviderFactory implements UserStorageProviderFactory<DBUserStorageProvider> {
     
     private static final String PARAMETER_PLACEHOLDER_HELP = "Use '?' as parameter placeholder character (replaced only once). ";
@@ -47,18 +46,22 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
     
     @Override
     public DBUserStorageProvider create(KeycloakSession session, ComponentModel model) {
-        ProviderConfig providerConfig = providerConfigPerInstance.computeIfAbsent(model.getId(), s -> configure(model));
-        return new DBUserStorageProvider(session, model, providerConfig.dataSourceProvider, providerConfig.queryConfigurations);
+        ProviderConfig providerConfig = providerConfigPerInstance.computeIfAbsent(model.getId(), s -> configure(model, session));
+        // Pass the QueryConfigurations to the DBUserStorageProvider constructor
+        return new DBUserStorageProvider(session, model, providerConfig.repository, providerConfig.queryConfigurations);
     }
     
-    private synchronized ProviderConfig configure(ComponentModel model) {
+    // Added KeycloakSession to configure method to pass to UserRepository if needed by future DataSourceProvider enhancements
+    private synchronized ProviderConfig configure(ComponentModel model, KeycloakSession session) {
         log.infov("Creating configuration for model: id={0} name={1}", model.getId(), model.getName());
         ProviderConfig providerConfig = new ProviderConfig();
         String         user           = model.get("user");
         String         password       = model.get("password");
         String         url            = model.get("url");
         RDBMS          rdbms          = RDBMS.getByDescription(model.get("rdbms"));
+        // Ensure DataSourceProvider is configured before UserRepository uses it
         providerConfig.dataSourceProvider.configure(url, rdbms, user, password, model.getName());
+        // Instantiate QueryConfigurations first
         providerConfig.queryConfigurations = new QueryConfigurations(
                 model.get("count"),
                 model.get("listAll"),
@@ -71,9 +74,10 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                 rdbms,
                 model.get("allowKeycloakDelete", false),
                 model.get("allowDatabaseToOverwriteKeycloak", false),
-                model.get("syncEnabled", false), 
-                model.get("unlinkEnabled", false)
+                model.get("syncNewUsersOnLogin", true) // This is the new flag
         );
+        // Instantiate UserRepository and store it in ProviderConfig
+        providerConfig.repository = new UserRepository(providerConfig.dataSourceProvider, providerConfig.queryConfigurations);
         return providerConfig;
     }
     
@@ -143,20 +147,13 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                                            .defaultValue("false")
                                            .add()
                                            .property()
-                                           .name("syncEnabled")
-                                           .label("Enable User Synchronization")
-                                           .helpText("If enabled, user data from the external database will be synchronized to Keycloak's local storage.")
+                                           .name("syncNewUsersOnLogin")
+                                           .label("Synchronize New Users on First Login")
+                                           .helpText("If enabled, when a user successfully authenticates against the external database for the first time and does not yet exist in Keycloak, a new Keycloak user will be created and linked to this provider. If disabled, only users already existing in Keycloak (and linked to this provider) can be processed further.")
                                            .type(ProviderConfigProperty.BOOLEAN_TYPE)
-                                           .defaultValue("false")
+                                           .defaultValue("true")
                                            .add()
-                                           .property()
-                                           .name("unlinkEnabled")
-                                           .label("Enable User Unlinking")
-                                           .helpText("If enabled, users can be unlinked from the federation, allowing them to set local Keycloak credentials.")
-                                           .type(ProviderConfigProperty.BOOLEAN_TYPE)
-                                           .defaultValue("false")
-                                           .add()
-        
+
                                            //QUERIES
         
                                            .property()
@@ -256,8 +253,9 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
     }
     
     private static class ProviderConfig {
-        private DataSourceProvider  dataSourceProvider = new DataSourceProvider();
+        private final DataSourceProvider  dataSourceProvider = new DataSourceProvider(); // Made final
         private QueryConfigurations queryConfigurations;
+        private UserRepository      repository; // Added UserRepository
     }
     
     

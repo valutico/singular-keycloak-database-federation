@@ -25,7 +25,7 @@ public class DataSourceProvider implements Closeable {
     }
     
     
-    public synchronized Optional<DataSource> getDataSource() {
+    synchronized Optional<DataSource> getDataSource() {
         return Optional.ofNullable(hikariDataSource);
     }
     

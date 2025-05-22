@@ -4,20 +4,21 @@ import org.opensingular.dbuserprovider.persistence.RDBMS;
 
 public class QueryConfigurations {
 
-    private String count;
-    private String listAll;
-    private String findById;
-    private String findByUsername;
-    private String findBySearchTerm;
-    private String findPasswordHash;
-    private String hashFunction;
-    private RDBMS  RDBMS;
-    private boolean allowKeycloakDelete;
-    private boolean allowDatabaseToOverwriteKeycloak;
-    private boolean syncEnabled;
-    private boolean unlinkEnabled;
+    private final String count;
+    private final String listAll;
+    private final String findById;
+    private final String findByUsername;
+    private final String findByEmail;
+    private final String findBySearchTerm;
+    private final int findBySearchTermParamsCount;
+    private final String findPasswordHash;
+    private final String hashFunction;
+    private final RDBMS  RDBMS;
+    private final boolean allowKeycloakDelete;
+    private final boolean allowDatabaseToOverwriteKeycloak;
+    private final boolean syncNewUsersOnLogin;
 
-    public QueryConfigurations(String count, String listAll, String findById, String findByUsername, String findBySearchTerm, String findPasswordHash, String hashFunction, RDBMS RDBMS, boolean allowKeycloakDelete, boolean allowDatabaseToOverwriteKeycloak, boolean syncEnabled, boolean unlinkEnabled) {
+    public QueryConfigurations(String count, String listAll, String findById, String findByUsername, String findByEmail, String findBySearchTerm, String findPasswordHash, String hashFunction, RDBMS RDBMS, boolean allowKeycloakDelete, boolean allowDatabaseToOverwriteKeycloak, boolean syncNewUsersOnLogin) {
         this.count = count;
         this.listAll = listAll;
         this.findById = findById;
@@ -30,8 +31,11 @@ public class QueryConfigurations {
         this.RDBMS = RDBMS;
         this.allowKeycloakDelete = allowKeycloakDelete;
         this.allowDatabaseToOverwriteKeycloak = allowDatabaseToOverwriteKeycloak;
-        this.syncEnabled = syncEnabled;
-        this.unlinkEnabled = unlinkEnabled;
+        this.syncNewUsersOnLogin = syncNewUsersOnLogin;
+    }
+
+    public boolean getSyncNewUsersOnLogin() {
+        return syncNewUsersOnLogin;
     }
 
     public RDBMS getRDBMS() {
@@ -88,13 +92,5 @@ public class QueryConfigurations {
 
     public boolean getAllowDatabaseToOverwriteKeycloak() {
         return allowDatabaseToOverwriteKeycloak;
-    }
-
-    public boolean isSyncEnabled() {
-        return syncEnabled;
-    }
-
-    public boolean isUnlinkEnabled() {
-        return unlinkEnabled;
     }
 }

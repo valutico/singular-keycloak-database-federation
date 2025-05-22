@@ -30,81 +30,19 @@ public class DBUserStorageProvider implements UserStorageProvider,
     
     private final KeycloakSession session;
     private final ComponentModel  model;
-    private final UserRepository  repository;
+    private final UserRepository  repository; // Made final
     private final boolean allowDatabaseToOverwriteKeycloak;
-    private final boolean syncEnabled;
-    private final boolean unlinkEnabled;
-    private final boolean syncEnabled;
-    private final boolean unlinkEnabled;
+    private final boolean syncNewUsersOnLogin;
 
-    DBUserStorageProvider(KeycloakSession session, ComponentModel model, DataSourceProvider dataSourceProvider, QueryConfigurations queryConfigurations) {
+    // Constructor now accepts UserRepository
+    DBUserStorageProvider(KeycloakSession session, ComponentModel model, UserRepository repository, QueryConfigurations queryConfigurations) {
         this.session    = session;
         this.model      = model;
-        this.repository = new UserRepository(dataSourceProvider, queryConfigurations);
+        this.repository = repository; // Use the passed-in repository
         this.allowDatabaseToOverwriteKeycloak = queryConfigurations.getAllowDatabaseToOverwriteKeycloak();
-        this.syncEnabled = queryConfigurations.isSyncEnabled();
-        this.unlinkEnabled = queryConfigurations.isUnlinkEnabled();
+        this.syncNewUsersOnLogin = queryConfigurations.getSyncNewUsersOnLogin();
     }
-    }
-
-    private UserModel syncUser(RealmModel realm, UserModel userAdapter) {
-        String username = userAdapter.getUsername();
-        log.infov("Attempting to sync user: {0}", username);
-
-        if (!this.syncEnabled) {
-            log.debugv("User synchronization is disabled. Skipping sync for user: {0}", username);
-            return userAdapter;
-        }
-
-        UserModel localUser = session.userLocalStorage().getUserByUsername(realm, username);
-
-        if (localUser == null) {
-            log.infov("User not found locally, creating new local user: {0}", username);
-            try {
-                localUser = session.userLocalStorage().addUser(realm, username);
-                localUser.setFederationLink(userAdapter.getId()); // Link to the federated user
-                localUser.setFirstName(userAdapter.getFirstName());
-                localUser.setLastName(userAdapter.getLastName());
-                localUser.setEmail(userAdapter.getEmail());
-                localUser.setEmailVerified(userAdapter.isEmailVerified());
-                // Copy attributes
-                for (Map.Entry<String, List<String>> attribute : userAdapter.getAttributes().entrySet()) {
-                    localUser.setAttribute(attribute.getKey(), attribute.getValue());
-                }
-                // Add any required actions if necessary, e.g.,
-                // localUser.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
-                log.infov("Successfully created local user: {0}", username);
-            } catch (Exception e) {
-                log.errorv(e, "Error creating local user: {0}", username);
-                return userAdapter; // return original adapter if sync fails
-            }
-        } else {
-            log.infov("Found existing local user: {0}. Updating attributes.", username);
-            if (!localUser.isEmailVerified() && userAdapter.isEmailVerified()){
-                 localUser.setEmailVerified(userAdapter.isEmailVerified());
-            }
-            if (userAdapter.getEmail() != null && !userAdapter.getEmail().equals(localUser.getEmail())) {
-                localUser.setEmail(userAdapter.getEmail());
-            }
-            if (userAdapter.getFirstName() != null && !userAdapter.getFirstName().equals(localUser.getFirstName())) {
-                localUser.setFirstName(userAdapter.getFirstName());
-            }
-            if (userAdapter.getLastName() != null && !userAdapter.getLastName().equals(localUser.getLastName())) {
-                localUser.setLastName(userAdapter.getLastName());
-            }
-            // Update attributes - be careful with read-only attributes or conflicts
-            try {
-                for (Map.Entry<String, List<String>> attribute : userAdapter.getAttributes().entrySet()) {
-                    // Potentially add checks here to avoid overwriting protected attributes
-                    localUser.setAttribute(attribute.getKey(), attribute.getValue());
-                }
-                log.infov("Successfully synced attributes for user: {0}", username);
-            } catch (ModelException e) { // More specific exception for read-only issues if available
-                log.warnv(e, "Could not update some attributes for user {0} (possibly read-only or conflict).", username);
-            }
-        }
-        return localUser;
-    }
+    
     
     private Stream<UserModel> toUserModel(RealmModel realm, List<Map<String, String>> users) {
         return users.stream()
@@ -148,20 +86,92 @@ public class DBUserStorageProvider implements UserStorageProvider,
             ((CachedUserModel) user).invalidate();
           }
         }
-        return repository.validateCredentials(dbUser.getUsername(), cred.getChallengeResponse());
+        boolean isValid = repository.validateCredentials(dbUser.getUsername(), cred.getChallengeResponse());
+
+        if (isValid) {
+            UserModel localUser = session.users().getUserByUsername(realm, dbUser.getUsername());
+            if (localUser == null) {
+                if (this.syncNewUsersOnLogin) {
+                    log.infov("User {0} not found locally, creating as syncNewUsersOnLogin is true...", dbUser.getUsername());
+                    localUser = session.users().addUser(realm, dbUser.getUsername());
+                    localUser.setEnabled(true);
+                    localUser.setEmail(dbUser.getEmail());
+                    localUser.setFirstName(dbUser.getFirstName());
+                    localUser.setLastName(dbUser.getLastName());
+
+                    if (dbUser instanceof UserAdapter) {
+                        UserAdapter dbUserAdapter = (UserAdapter) dbUser;
+                        for (Map.Entry<String, List<String>> entry : dbUserAdapter.getAttributes().entrySet()) {
+                            // Avoid overwriting essential or protected attributes
+                            if (!entry.getKey().equalsIgnoreCase(UserModel.USERNAME) &&
+                                !entry.getKey().equalsIgnoreCase(UserModel.EMAIL) &&
+                                !entry.getKey().equalsIgnoreCase(UserModel.FIRST_NAME) &&
+                                !entry.getKey().equalsIgnoreCase(UserModel.LAST_NAME)) {
+                                localUser.setAttribute(entry.getKey(), entry.getValue());
+                            }
+                        }
+                    }
+                    localUser.setFederationLink(model.getId());
+                    log.infov("User {0} created locally and linked to provider {1}", localUser.getUsername(), model.getId());
+                } else {
+                    log.infov("User {0} not found locally and syncNewUsersOnLogin is false, login failed.", dbUser.getUsername());
+                    // If sync is off and user is not local, isValid should effectively be false for this provider.
+                    // However, the external DB already validated the password.
+                    // This means an external user authenticated, but we are choosing not to import them.
+                    // Keycloak will then proceed to other providers or ultimately fail the login if no provider can establish a local user.
+                    // Returning false here would be misleading as the credential WAS valid against the external DB.
+                    // The decision not to import is a policy of this provider instance.
+                }
+            } else {
+                log.infov("User {0} found locally.", dbUser.getUsername());
+                if (allowDatabaseToOverwriteKeycloak && model.getId().equals(localUser.getFederationLink())) {
+                    log.infov("Updating user {0} from database.", dbUser.getUsername());
+                    localUser.setEmail(dbUser.getEmail());
+                    localUser.setFirstName(dbUser.getFirstName());
+                    localUser.setLastName(dbUser.getLastName());
+                    if (dbUser instanceof UserAdapter) {
+                        UserAdapter dbUserAdapter = (UserAdapter) dbUser;
+                        for (Map.Entry<String, List<String>> entry : dbUserAdapter.getAttributes().entrySet()) {
+                            // Avoid overwriting essential or protected attributes
+                            if (!entry.getKey().equalsIgnoreCase(UserModel.USERNAME) &&
+                                !entry.getKey().equalsIgnoreCase(UserModel.EMAIL) &&
+                                !entry.getKey().equalsIgnoreCase(UserModel.FIRST_NAME) &&
+                                !entry.getKey().equalsIgnoreCase(UserModel.LAST_NAME)) {
+                                localUser.setAttribute(entry.getKey(), entry.getValue());
+                            }
+                        }
+                    }
+                    log.infov("User {0} updated.", localUser.getUsername());
+                } else {
+                    log.infov("Not updating user {0}. allowDatabaseToOverwriteKeycloak={1}, federationLink={2}", dbUser.getUsername(), allowDatabaseToOverwriteKeycloak, localUser.getFederationLink());
+                }
+            }
+        }
+        return isValid;
     }
-    
+
     @Override
     public boolean updateCredential(RealmModel realm, UserModel user, CredentialInput input) {
         
-        log.infov("updating credential: realm={0} user={1}", realm.getId(), user.getUsername());
-        
-        if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) {
-            return false;
+        if (user.getFederationLink() == null) {
+            // User is local (unlinked)
+            log.infov("Attempting local password update for unlinked user: {0}", user.getUsername());
+            if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) {
+                 return false;
+            }
+            // Delegate to Keycloak's default mechanism for local users
+            return session.userCredentialManager().updateCredential(realm, user, input);
+        } else {
+            // User is federated, maintain existing behavior
+            log.infov("Attempting credential update for federated user: realm={0} user={1}", realm.getId(), user.getUsername());
+            
+            if (!supportsCredentialType(input.getType()) || !(input instanceof UserCredentialModel)) {
+                return false;
+            }
+            
+            UserCredentialModel cred = (UserCredentialModel) input;
+            return repository.updateCredentials(user.getUsername(), cred.getChallengeResponse());
         }
-        
-        UserCredentialModel cred = (UserCredentialModel) input;
-        return repository.updateCredentials(user.getUsername(), cred.getChallengeResponse());
     }
     
     @Override
@@ -201,19 +211,21 @@ public class DBUserStorageProvider implements UserStorageProvider,
     public UserModel getUserById(RealmModel realm, String id) {
         
         log.infov("lookup user by id: realm={0} userId={1}", realm.getId(), id);
+
+        UserModel localUser = session.users().getUserById(realm, id);
+        if (localUser != null && localUser.getFederationLink() == null) {
+            log.debugv("User found in Keycloak local storage and is not federated: userId={0}", id);
+            return localUser;
+        }
         
         String externalId = StorageId.externalId(id);
         Map<String, String> user = repository.findUserById(externalId);
 
         if (user == null) {
-            log.debugv("findUserById returned null, skipping creation of UserAdapter, expect login error");
+            log.debugv("findUserById returned null for externalId {0}, skipping creation of UserAdapter", externalId);
             return null;
         } else {
-            UserModel userAdapter = new UserAdapter(session, realm, model, user, allowDatabaseToOverwriteKeycloak);
-            if (this.syncEnabled) {
-                return syncUser(realm, userAdapter);
-            }
-            return userAdapter;
+            return new UserAdapter(session, realm, model, user, allowDatabaseToOverwriteKeycloak);
         }
     }
     
@@ -221,38 +233,28 @@ public class DBUserStorageProvider implements UserStorageProvider,
     public UserModel getUserByUsername(RealmModel realm, String username) {
         
         log.infov("lookup user by username: realm={0} username={1}", realm.getId(), username);
-        
-        UserModel userAdapter = repository.findUserByUsername(username).map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak)).orElse(null);
-        if (userAdapter != null) {
-            if (this.syncEnabled) {
-                return syncUser(realm, userAdapter);
-            }
-            return userAdapter;
+
+        UserModel localUser = session.users().getUserByUsername(realm, username);
+        if (localUser != null && localUser.getFederationLink() == null) {
+            log.debugv("User found in Keycloak local storage and is not federated: username={0}", username);
+            return localUser;
         }
-        return null;
+        
+        return repository.findUserByUsername(username).map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak)).orElse(null);
     }
     
     @Override
     public UserModel getUserByEmail(RealmModel realm, String email) {
         
-        log.infov("lookup user by email: realm={0} email={1}", realm.getId(), email); // Log corrected to email
-        
-        // return repository.findUserByEmail(email).map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak)).orElse(null);
+        log.infov("lookup user by email: realm={0} email={1}", realm.getId(), email);
 
-
-        // Assuming getUserByUsername can also find by email if the DB query is configured that way,
-        // or if username and email are the same. If not, this might need adjustment
-        // to call a specific repository.findUserByEmail if available.
-        UserModel userAdapter = repository.findUserByUsername(email) // This might need to be repository.findUserByEmail(email)
-                                .map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak))
-                                .orElse(null);
-        if (userAdapter != null) {
-            if (this.syncEnabled) {
-                return syncUser(realm, userAdapter);
-            }
-            return userAdapter;
+        UserModel localUser = session.users().getUserByEmail(realm, email);
+        if (localUser != null && localUser.getFederationLink() == null) {
+            log.debugv("User found in Keycloak local storage and is not federated: email={0}", email);
+            return localUser;
         }
-        return null;
+        
+        return repository.findUserByEmail(email).map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak)).orElse(null);
     }
     
     @Override
@@ -342,35 +344,5 @@ public class DBUserStorageProvider implements UserStorageProvider,
         }
         
         return userRemoved;
-    }
-
-    /**
-     * Removes the federation link from the user.
-     *
-     * @param realm The realm.
-     * @param user  The user to unlink.
-     * @return True if unlinking was successful, false otherwise.
-     */
-    public boolean unlinkUser(RealmModel realm, UserModel user) {
-        log.infov("Attempting to unlink user: realm={0} username={1}", realm.getId(), user.getUsername());
-
-        if (!this.unlinkEnabled) {
-            log.warnv("User unlinking is disabled by configuration. Skipping for user: {0}", user.getUsername());
-            return false;
-        }
-
-        if (user.getFederationLink() == null) {
-            log.infov("User {0} is not federated or already unlinked.", user.getUsername());
-            return true; // Considered success as the link is not present
-        }
-
-        try {
-            user.setFederationLink(null);
-            log.infov("Successfully unlinked user: {0}", user.getUsername());
-            return true;
-        } catch (Exception e) {
-            log.errorv(e, "Error unlinking user: {0}", user.getUsername());
-            return false;
-        }
     }
 }
