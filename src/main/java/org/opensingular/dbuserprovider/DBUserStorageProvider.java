@@ -34,6 +34,8 @@ public class DBUserStorageProvider implements UserStorageProvider,
     private final boolean allowDatabaseToOverwriteKeycloak;
     private final boolean syncEnabled;
     private final boolean unlinkEnabled;
+    private final boolean syncEnabled;
+    private final boolean unlinkEnabled;
 
     DBUserStorageProvider(KeycloakSession session, ComponentModel model, DataSourceProvider dataSourceProvider, QueryConfigurations queryConfigurations) {
         this.session    = session;
