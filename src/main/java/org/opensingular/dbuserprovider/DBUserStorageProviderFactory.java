@@ -34,14 +34,9 @@ import java.util.stream.Stream;
 @JBossLog
 @AutoService(UserStorageProviderFactory.class)
 @SuppressWarnings("rawtypes") // Added to suppress AutoService warning
-public class DBUserStorageProviderFactory implements 
-        UserStorageProviderFactory<DBUserStorageProvider>,
-        UserLookupProvider,
-        UserQueryProvider, 
-        CredentialInputUpdater, 
-        CredentialInputValidator, 
-        UserRegistrationProvider {
-    
+public class DBUserStorageProviderFactory implements
+        UserStorageProviderFactory<DBUserStorageProvider> {
+
     private static final String PARAMETER_PLACEHOLDER_HELP = "Use '?' as parameter placeholder character (replaced only once). ";
     private static final String DEFAULT_HELP_TEXT          = "Select to query all users you must return at least: \"id\". " +
                                                              "            \"username\"," +
@@ -264,118 +259,4 @@ public class DBUserStorageProviderFactory implements
         private QueryConfigurations queryConfigurations;
     }
     
-    // UserLookupProvider implementation
-    @Override
-    public UserModel getUserById(KeycloakSession session, RealmModel realm, String id) {
-        return getProvider(session).getUserById(session, realm, id);
-    }
-
-    @Override
-    public UserModel getUserByUsername(KeycloakSession session, RealmModel realm, String username) {
-        return getProvider(session).getUserByUsername(session, realm, username);
-    }
-
-    @Override
-    public UserModel getUserByEmail(KeycloakSession session, RealmModel realm, String email) {
-        return getProvider(session).getUserByEmail(session, realm, email);
-    }
-
-    // UserQueryProvider implementation
-    @Override
-    public int getUsersCount(KeycloakSession session, RealmModel realm) {
-        return getProvider(session).getUsersCount(session, realm);
-    }
-
-    @Override
-    public Stream<UserModel> searchForUserStream(KeycloakSession session, RealmModel realm, Map<String, String> params, Integer firstResult, Integer maxResults) {
-        return getProvider(session).searchForUserStream(session, realm, params, firstResult, maxResults);
-    }
-
-    @Override
-    public Stream<UserModel> searchForUserStream(KeycloakSession session, RealmModel realm, String search, Integer firstResult, Integer maxResults) {
-        return getProvider(session).searchForUserStream(session, realm, search, firstResult, maxResults);
-    }
-
-    @Override
-    public Stream<UserModel> getGroupMembersStream(KeycloakSession session, RealmModel realm, GroupModel group, Integer firstResult, Integer maxResults) {
-        return getProvider(session).getGroupMembersStream(session, realm, group, firstResult, maxResults);
-    }
-
-    @Override
-    public Stream<UserModel> searchForUserByUserAttributeStream(KeycloakSession session, RealmModel realm, String attrName, String attrValue) {
-        return getProvider(session).searchForUserByUserAttributeStream(session, realm, attrName, attrValue);
-    }
-
-    // CredentialInputValidator implementation
-    @Override
-    public boolean supportsCredentialType(String credentialType) {
-        return getProvider(null).supportsCredentialType(credentialType);
-    }
-
-    @Override
-    public boolean isConfiguredFor(KeycloakSession session, RealmModel realm, UserModel user, String credentialType) {
-        return getProvider(session).isConfiguredFor(session, realm, user, credentialType);
-    }
-
-    @Override
-    public boolean isValid(KeycloakSession session, RealmModel realm, UserModel user, CredentialInput input) {
-        return getProvider(session).isValid(session, realm, user, input);
-    }
-
-    // CredentialInputUpdater implementation
-    @Override
-    public boolean updateCredential(KeycloakSession session, RealmModel realm, UserModel user, CredentialInput input) {
-        return getProvider(session).updateCredential(session, realm, user, input);
-    }
-
-    @Override
-    public void disableCredentialType(KeycloakSession session, RealmModel realm, UserModel user, String credentialType) {
-        getProvider(session).disableCredentialType(session, realm, user, credentialType);
-    }
-
-    @Override
-    public Stream<String> getDisableableCredentialTypesStream(KeycloakSession session, RealmModel realm, UserModel user) {
-        return getProvider(session).getDisableableCredentialTypesStream(session, realm, user);
-    }
-
-    // UserRegistrationProvider implementation
-    @Override
-    public UserModel addUser(KeycloakSession session, RealmModel realm, String username) {
-        return getProvider(session).addUser(session, realm, username);
-    }
-
-    @Override
-    public boolean removeUser(KeycloakSession session, RealmModel realm, UserModel user) {
-        return getProvider(session).removeUser(session, realm, user);
-    }
-
-    // Helper method to get a provider instance
-    private DBUserStorageProvider getProvider(KeycloakSession session) {
-        if (session == null) {
-            // This is used only for supportsCredentialType which doesn't need a session
-            return new DBUserStorageProvider(null, null, null, null) {
-                @Override
-                public boolean supportsCredentialType(String credentialType) {
-                    return PasswordCredentialModel.TYPE.equals(credentialType);
-                }
-            };
-        }
-        
-        ComponentModel componentModel = null;
-        String realmId = null;
-        
-        if (session.getContext() != null && session.getContext().getRealm() != null) {
-            realmId = session.getContext().getRealm().getId();
-            componentModel = session.getContext().getRealm().getComponentsStream()
-                .filter(component -> component.getProviderId().equals(getId()))
-                .findFirst()
-                .orElse(null);
-        }
-        
-        if (componentModel == null) {
-            throw new IllegalStateException("Could not find component model for provider: " + getId());
-        }
-        
-        return create(session, componentModel);
-    }
 }
