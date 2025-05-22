@@ -1,0 +1,28 @@
+{
+  "name": "Keycloak 24 Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/java:1-21-bullseye",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "java.jdt.ls.java.home": "/usr/lib/jvm/msopenjdk-21-amd64",
+        "java.configuration.runtimes": [
+          {
+            "name": "JavaSE-21",
+            "path": "/usr/lib/jvm/msopenjdk-21-amd64",
+            "default": true
+          }
+        ]
+      },
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "redhat.java"
+      ]
+    }
+  },
+  "forwardPorts": [
+    8080,
+    8443
+  ],
+  "postCreateCommand": "java -version && mvn --version",
+  "remoteUser": "vscode"
+}
