@@ -11,6 +11,7 @@ import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.user.UserLookupProvider;
+import org.keycloak.storage.ImportSynchronization;
 import org.keycloak.storage.user.UserQueryProvider;
 import org.keycloak.storage.user.UserRegistrationProvider;
 import org.opensingular.dbuserprovider.model.QueryConfigurations;
@@ -26,18 +27,20 @@ import java.util.stream.Stream;
 
 @JBossLog
 public class DBUserStorageProvider implements UserStorageProvider,
-                                              UserLookupProvider, UserQueryProvider, CredentialInputUpdater, CredentialInputValidator, UserRegistrationProvider {
+                                              UserLookupProvider, UserQueryProvider, CredentialInputUpdater, CredentialInputValidator, UserRegistrationProvider, ImportSynchronization {
     
     private final KeycloakSession session;
     private final ComponentModel  model;
     private final UserRepository  repository;
     private final boolean allowDatabaseToOverwriteKeycloak;
+    private final boolean syncEnabled;
 
     DBUserStorageProvider(KeycloakSession session, ComponentModel model, DataSourceProvider dataSourceProvider, QueryConfigurations queryConfigurations) {
         this.session    = session;
         this.model      = model;
         this.repository = new UserRepository(dataSourceProvider, queryConfigurations);
         this.allowDatabaseToOverwriteKeycloak = queryConfigurations.getAllowDatabaseToOverwriteKeycloak();
+        this.syncEnabled = queryConfigurations.isSyncEnabled();
     }
     
     
@@ -96,7 +99,17 @@ public class DBUserStorageProvider implements UserStorageProvider,
         }
         
         UserCredentialModel cred = (UserCredentialModel) input;
-        return repository.updateCredentials(user.getUsername(), cred.getChallengeResponse());
+
+        if (user.getFederationLink() != null && user.getFederationLink().equals(model.getId())) {
+            // User is linked to this provider. Attempt to update in external DB.
+            // This is expected to either fail or do nothing as per provider's capability.
+            return repository.updateCredentials(user.getUsername(), cred.getChallengeResponse());
+        } else {
+            // User is not linked to this provider or is unlinked.
+            // Keycloak should handle the password update locally.
+            log.infov("User {0} is not directly federated with this provider or is unlinked. Allowing Keycloak to handle password update.", user.getUsername());
+            return false;
+        }
     }
     
     @Override
@@ -251,5 +264,88 @@ public class DBUserStorageProvider implements UserStorageProvider,
         }
         
         return userRemoved;
+    }
+
+    public void unlinkUser(RealmModel realm, String userId) {
+        log.infov("Attempting to unlink user: realmId={0} userId={1}", realm.getId(), userId);
+        UserModel user = session.users().getUserById(realm, userId);
+
+        if (user != null) {
+            if (user.getFederationLink() != null && user.getFederationLink().equals(model.getId())) {
+                user.setFederationLink(null);
+                log.infov("User unlinked: realmId={0} userId={1}", realm.getId(), userId);
+            } else {
+                log.warnv("User does not have a matching federation link: realmId={0} userId={1} federationLink={2}", realm.getId(), userId, user.getFederationLink());
+            }
+        } else {
+            log.warnv("User not found for unlinking: realmId={0} userId={1}", realm.getId(), userId);
+        }
+    }
+
+    @Override
+    public SynchronizationResult sync(KeycloakSessionFactory sessionFactory) {
+        log.infov("Sync called. Sync enabled: {0}", syncEnabled);
+        if (!syncEnabled) {
+            return SynchronizationResult.empty();
+        }
+
+        log.info("Starting user synchronization...");
+        SynchronizationResult result = SynchronizationResult.empty();
+        List<Map<String, String>> usersFromDb = repository.getAllUsersForSync(); // This method needs to be created in UserRepository
+
+        for (Map<String, String> dbUserMap : usersFromDb) {
+            String username = dbUserMap.get("username");
+            if (username == null) {
+                log.warnv("User from DB is missing username: {0}", dbUserMap);
+                result.increaseFailed();
+                continue;
+            }
+
+            RealmModel realm = session.realms().getRealm(model.getParentId());
+            UserModel keycloakUser = this.getUserByUsername(realm, username);
+
+            if (keycloakUser == null) {
+                log.infov("User {0} not found in Keycloak, creating...", username);
+                keycloakUser = this.addUser(realm, username);
+                if (keycloakUser == null) {
+                    log.errorv("Failed to add user {0} to Keycloak.", username);
+                    result.increaseFailed();
+                    continue;
+                }
+                keycloakUser.setFederationLink(model.getId());
+                mapUserAttributes(keycloakUser, dbUserMap);
+                result.increaseAdded();
+                log.infov("User {0} created in Keycloak.", username);
+            } else {
+                if (allowDatabaseToOverwriteKeycloak) {
+                    log.infov("User {0} found in Keycloak, updating attributes...", username);
+                    if (!model.getId().equals(keycloakUser.getFederationLink())) {
+                        keycloakUser.setFederationLink(model.getId());
+                    }
+                    mapUserAttributes(keycloakUser, dbUserMap);
+                    result.increaseUpdated();
+                    log.infov("User {0} updated in Keycloak.", username);
+                } else {
+                    log.infov("User {0} found in Keycloak, but overwrite is disabled.", username);
+                }
+            }
+        }
+        log.info("User synchronization complete.");
+        return result;
+    }
+
+    private void mapUserAttributes(UserModel keycloakUser, Map<String, String> dbUserMap) {
+        keycloakUser.setEmail(dbUserMap.get("email"));
+        keycloakUser.setFirstName(dbUserMap.get("firstName"));
+        keycloakUser.setLastName(dbUserMap.get("lastName"));
+        // Add any other attribute mappings here if needed
+    }
+
+    @Override
+    public SynchronizationResult syncSince(java.util.Date lastSync, KeycloakSessionFactory sessionFactory) {
+        log.infov("SyncSince called. Last sync: {0}, Sync enabled: {1}", lastSync, syncEnabled);
+        // For now, just call the full sync method.
+        // Future enhancements could fetch only updated users from the DB.
+        return sync(sessionFactory);
     }
 }

@@ -69,7 +69,9 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                 model.get("hashFunction"),
                 rdbms,
                 model.get("allowKeycloakDelete", false),
-                model.get("allowDatabaseToOverwriteKeycloak", false)
+                model.get("allowDatabaseToOverwriteKeycloak", false),
+                model.get("syncEnabled", false),
+                model.get("listAllForSync", model.get("listAll"))
         );
         return providerConfig;
     }
@@ -139,6 +141,13 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                                            .type(ProviderConfigProperty.BOOLEAN_TYPE)
                                            .defaultValue("false")
                                            .add()
+                                           .property()
+                                           .name("syncEnabled")
+                                           .label("Enable Sync")
+                                           .helpText("Enable user synchronization with Keycloak. If enabled, Keycloak will periodically sync users from the external database.")
+                                           .type(ProviderConfigProperty.BOOLEAN_TYPE)
+                                           .defaultValue("false")
+                                           .add()
         
                                            //QUERIES
         
@@ -152,8 +161,8 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
         
                                            .property()
                                            .name("listAll")
-                                           .label("List All Users SQL query")
-                                           .helpText(DEFAULT_HELP_TEXT)
+                                           .label("List All Users SQL query (for pagination)")
+                                           .helpText(DEFAULT_HELP_TEXT + " This query is used for paginated user listing.")
                                            .type(ProviderConfigProperty.STRING_TYPE)
                                            .defaultValue("select \"id\"," +
                                                          "            \"username\"," +
@@ -162,6 +171,14 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                                                          "            \"lastName\"," +
                                                          "            \"cpf\"," +
                                                          "            \"fullName\" from users ")
+                                           .add()
+
+                                           .property()
+                                           .name("listAllForSync")
+                                           .label("List All Users SQL query (for sync)")
+                                           .helpText(DEFAULT_HELP_TEXT + " This query is used for user synchronization. If empty, 'List All Users SQL query (for pagination)' will be used. Ensure this query returns all users without pagination or specific ordering that might interfere with sync.")
+                                           .type(ProviderConfigProperty.STRING_TYPE)
+                                           .defaultValue("")
                                            .add()
         
                                            .property()
