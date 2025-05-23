@@ -10,16 +10,19 @@ import org.keycloak.models.*;
 import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.storage.user.UserLookupProvider;
-import org.keycloak.storage.ImportSynchronization;
 import org.keycloak.storage.user.UserQueryProvider;
 import org.keycloak.storage.user.UserRegistrationProvider;
+import org.keycloak.storage.user.ImportSynchronization;
+import org.keycloak.storage.user.SynchronizationResult;
 import org.opensingular.dbuserprovider.model.QueryConfigurations;
 import org.opensingular.dbuserprovider.model.UserAdapter;
 import org.opensingular.dbuserprovider.persistence.DataSourceProvider;
 import org.opensingular.dbuserprovider.persistence.UserRepository;
 import org.opensingular.dbuserprovider.util.PagingUtil;
 
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,14 +33,14 @@ public class DBUserStorageProvider implements UserStorageProvider,
                                               UserLookupProvider, UserQueryProvider, CredentialInputUpdater, CredentialInputValidator, UserRegistrationProvider, ImportSynchronization {
     
     private final KeycloakSession session;
-    private final ComponentModel  model;
-    private final UserRepository  repository;
+    private final UserStorageProviderModel model;
+    private final UserRepository repository;
     private final boolean allowDatabaseToOverwriteKeycloak;
     private final boolean syncEnabled;
 
-    DBUserStorageProvider(KeycloakSession session, ComponentModel model, DataSourceProvider dataSourceProvider, QueryConfigurations queryConfigurations) {
-        this.session    = session;
-        this.model      = model;
+    DBUserStorageProvider(KeycloakSession session, UserStorageProviderModel model, DataSourceProvider dataSourceProvider, QueryConfigurations queryConfigurations) {
+        this.session = session;
+        this.model = model;
         this.repository = new UserRepository(dataSourceProvider, queryConfigurations);
         this.allowDatabaseToOverwriteKeycloak = queryConfigurations.getAllowDatabaseToOverwriteKeycloak();
         this.syncEnabled = queryConfigurations.isSyncEnabled();
@@ -283,7 +286,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
     }
 
     @Override
-    public SynchronizationResult sync(KeycloakSessionFactory sessionFactory) {
+    public SynchronizationResult sync(KeycloakSessionFactory sessionFactory, String realmId, UserStorageProviderModel model) {
         log.infov("Sync called. Sync enabled: {0}", syncEnabled);
         if (!syncEnabled) {
             return SynchronizationResult.empty();
@@ -291,7 +294,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
 
         log.info("Starting user synchronization...");
         SynchronizationResult result = SynchronizationResult.empty();
-        List<Map<String, String>> usersFromDb = repository.getAllUsersForSync(); // This method needs to be created in UserRepository
+        List<Map<String, String>> usersFromDb = repository.getAllUsersForSync();
 
         for (Map<String, String> dbUserMap : usersFromDb) {
             String username = dbUserMap.get("username");
@@ -301,7 +304,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
                 continue;
             }
 
-            RealmModel realm = session.realms().getRealm(model.getParentId());
+            RealmModel realm = session.realms().getRealm(realmId);
             UserModel keycloakUser = this.getUserByUsername(realm, username);
 
             if (keycloakUser == null) {
@@ -334,18 +337,18 @@ public class DBUserStorageProvider implements UserStorageProvider,
         return result;
     }
 
+    @Override
+    public SynchronizationResult syncSince(Date lastSync, KeycloakSessionFactory sessionFactory, String realmId, UserStorageProviderModel model) {
+        log.infov("SyncSince called. Last sync: {0}, Sync enabled: {1}", lastSync, syncEnabled);
+        // For now, just call the full sync method.
+        // Future enhancements could fetch only updated users from the DB.
+        return sync(sessionFactory, realmId, model);
+    }
+
     private void mapUserAttributes(UserModel keycloakUser, Map<String, String> dbUserMap) {
         keycloakUser.setEmail(dbUserMap.get("email"));
         keycloakUser.setFirstName(dbUserMap.get("firstName"));
         keycloakUser.setLastName(dbUserMap.get("lastName"));
         // Add any other attribute mappings here if needed
-    }
-
-    @Override
-    public SynchronizationResult syncSince(java.util.Date lastSync, KeycloakSessionFactory sessionFactory) {
-        log.infov("SyncSince called. Last sync: {0}, Sync enabled: {1}", lastSync, syncEnabled);
-        // For now, just call the full sync method.
-        // Future enhancements could fetch only updated users from the DB.
-        return sync(sessionFactory);
     }
 }

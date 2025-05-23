@@ -1,6 +1,6 @@
 package org.opensingular.dbuserprovider;
 
-import org.keycloak.Config;
+import org.keycloak.Config.Scope;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.services.resource.RealmResourceProvider;
@@ -11,7 +11,7 @@ import com.google.auto.service.AutoService;
 @AutoService(RealmResourceProviderFactory.class)
 public class DBUserStorageResourceProviderFactory implements RealmResourceProviderFactory {
 
-    public static final String ID = "db-user-storage-resource";
+    public static final String ID = "db-user-storage";
 
     @Override
     public String getId() {
@@ -20,11 +20,11 @@ public class DBUserStorageResourceProviderFactory implements RealmResourceProvid
 
     @Override
     public RealmResourceProvider create(KeycloakSession session) {
-        return new DBUserStorageResource(session);
+        return new DBUserStorageResource(session, null);
     }
 
     @Override
-    public void init(Config.Scope config) {
+    public void init(Scope config) {
         // NOOP
     }
 

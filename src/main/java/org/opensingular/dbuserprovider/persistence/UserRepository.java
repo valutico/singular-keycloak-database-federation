@@ -207,10 +207,6 @@ public class UserRepository {
         return queryConfigurations.getAllowKeycloakDelete();
     }
     
-    public boolean removeUser() {
-        return queryConfigurations.getAllowKeycloakDelete();
-    }
-    
     public List<Map<String, String>> getAllUsersForSync() {
         log.infov("Getting all users for sync using query: {0}", queryConfigurations.getListAllForSync());
         return doQuery(queryConfigurations.getListAllForSync(), null, this::readMap);
