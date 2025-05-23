@@ -1,0 +1,35 @@
+{
+    "name": "Keycloak 24 Dev Environment",
+    "build": {
+      "dockerfile": "Dockerfile"
+      // You can pass arguments to your Dockerfile if needed
+      // "args": {
+      //   "MAVEN_VERSION": "3.9.6"
+      // }
+    },
+    "customizations": {
+      "vscode": {
+        "settings": {
+          // The Java path should remain correct as the base image provides it
+          "java.jdt.ls.java.home": "/usr/lib/jvm/msopenjdk-21-amd64",
+          "java.configuration.runtimes": [
+            {
+              "name": "JavaSE-21",
+              "path": "/usr/lib/jvm/msopenjdk-21-amd64",
+              "default": true
+            }
+          ]
+        },
+        "extensions": [
+          "vscjava.vscode-java-pack",
+          "redhat.java"
+        ]
+      }
+    },
+    "forwardPorts": [
+      8080, // Keycloak HTTP
+      8443  // Keycloak HTTPS
+    ],
+    "postCreateCommand": "java -version && mvn --version",
+    "remoteUser": "vscode"
+  }
