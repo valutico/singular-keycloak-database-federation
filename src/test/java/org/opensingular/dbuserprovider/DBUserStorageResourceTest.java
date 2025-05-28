@@ -41,14 +41,13 @@ public class DBUserStorageResourceTest {
 
     private DBUserStorageResource resource;
 
+    private static final String PROVIDER_ID = "singular-db-user-provider";
+
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        when(session.getContext()).thenReturn(context);
-        when(context.getRealm()).thenReturn(realm);
-        when(session.getProvider(UserStorageProvider.class, model.getProviderId())).thenReturn(provider);
-        when(session.getKeycloakSessionFactory()).thenReturn(sessionFactory);
         resource = new DBUserStorageResource(session, model);
+        when(session.getProvider(UserStorageProvider.class, PROVIDER_ID)).thenReturn(provider);
     }
 
     @Test
@@ -61,8 +60,14 @@ public class DBUserStorageResourceTest {
 
     @Test
     public void testSyncWhenProviderDoesNotSupportSync() {
-        UserStorageProviderFactory regularFactory = mock(UserStorageProviderFactory.class);
-        when(sessionFactory.getProviderFactory(UserStorageProvider.class, model.getProviderId())).thenReturn(regularFactory);
+        // First, ensure the provider is returned
+        when(model.getProviderId()).thenReturn(PROVIDER_ID);
+        when(session.getProvider(UserStorageProvider.class, PROVIDER_ID)).thenReturn(provider);
+        when(session.getKeycloakSessionFactory()).thenReturn(sessionFactory);
+        
+        // We can't mock instanceof directly, so let's simulate the behavior by ensuring
+        // the provider is not an instance of ImportSynchronization
+        // The resource class will do instanceof check internally
         
         Response response = resource.sync();
         assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
@@ -70,17 +75,30 @@ public class DBUserStorageResourceTest {
 
     @Test
     public void testSyncSuccess() {
-        // Create a factory that implements both interfaces
-        UserStorageProviderFactory syncFactory = mock(UserStorageProviderFactory.class, withSettings().extraInterfaces(ImportSynchronization.class));
-        when(sessionFactory.getProviderFactory(UserStorageProvider.class, model.getProviderId())).thenReturn(syncFactory);
+        // Create a mock that explicitly implements both interfaces
+        UserStorageProvider syncProvider = mock(DBUserStorageProvider.class);
+        ImportSynchronization syncInterface = (ImportSynchronization) syncProvider;
         
-        // Cast to ImportSynchronization to stub the sync method
-        ImportSynchronization syncCapable = (ImportSynchronization) syncFactory;
-        SynchronizationResult mockResult = mock(SynchronizationResult.class);
-        when(syncCapable.sync(any(), anyString(), any())).thenReturn(mockResult);
+        // Setup the model and session for sync
+        when(model.getId()).thenReturn(PROVIDER_ID);
+        when(model.getProviderId()).thenReturn(PROVIDER_ID);
+        when(session.getProvider(UserStorageProvider.class, PROVIDER_ID)).thenReturn(syncProvider);
+        when(session.getKeycloakSessionFactory()).thenReturn(sessionFactory);
+        when(session.getContext()).thenReturn(context);
+        when(context.getRealm()).thenReturn(realm);
+        when(realm.getId()).thenReturn("test-realm");
         
+        // Create a properly initialized SynchronizationResult
+        SynchronizationResult result = new SynchronizationResult();
+        
+        // Setup the sync method to return a result
+        doReturn(result).when(syncInterface).sync(any(KeycloakSessionFactory.class), anyString(), any(UserStorageProviderModel.class));
+        
+        // Call the method under test
         Response response = resource.sync();
+        
+        // Verify the result
         assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-        verify(syncCapable).sync(any(), anyString(), any());
+        verify(syncInterface).sync(eq(sessionFactory), eq("test-realm"), eq(model));
     }
 }
