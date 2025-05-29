@@ -251,10 +251,32 @@ public class DBUserStorageProvider implements UserStorageProvider,
         return toUserModel(realm, repository.findUsers(search, pageable));
     }
     
+    /**
+     * Adds a user from the database to Keycloak
+     */
     @Override
     public UserModel addUser(RealmModel realm, String username) {
-        // from documentation: "If your provider has a configuration switch to turn off adding a user, returning null from this method will skip the provider and call the next one."
-        return null;
+        // Look up user in database
+        Map<String, String> dbUser = repository.findUserByUsername(username).orElse(null);
+        
+        if (dbUser == null) {
+            return null;
+        }
+        
+        // Create new user in Keycloak's local storage
+        UserModel userModel = session.users().addUser(realm, username);
+        
+        // Set basic attributes
+        userModel.setEnabled(true);
+        userModel.setEmail(dbUser.get("email"));
+        userModel.setFirstName(dbUser.get("firstName"));
+        userModel.setLastName(dbUser.get("lastName"));
+        userModel.setFederationLink(model.getId());
+        
+        // Map any additional attributes if needed
+        mapUserAttributes(userModel, dbUser);
+        
+        return userModel;
     }
     
     
@@ -285,7 +307,9 @@ public class DBUserStorageProvider implements UserStorageProvider,
         }
     }
 
-    @Override
+    /**
+     * Syncs all users from the database to Keycloak
+     */
     public SynchronizationResult sync(KeycloakSessionFactory sessionFactory, String realmId, UserStorageProviderModel model) {
         log.infov("Sync called. Sync enabled: {0}", syncEnabled);
         if (!syncEnabled) {

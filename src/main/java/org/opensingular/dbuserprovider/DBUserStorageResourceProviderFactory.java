@@ -20,7 +20,7 @@ public class DBUserStorageResourceProviderFactory implements RealmResourceProvid
 
     @Override
     public RealmResourceProvider create(KeycloakSession session) {
-        return new DBUserStorageResource(session, null);
+        return new DBUserStorageResource(session);
     }
 
     @Override
