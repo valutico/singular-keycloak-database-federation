@@ -63,7 +63,7 @@ public class DBUserStorageProviderTest {
     @Test
     public void testSync() {
         when(queryConfigurations.isSyncEnabled()).thenReturn(true);
-        when(userRepository.getAllUsers()).thenReturn(java.util.Collections.emptyList());
+        when(userRepository.getAllUsersForSync()).thenReturn(java.util.Collections.emptyList());
 
         SynchronizationResult result = provider.sync(session.getKeycloakSessionFactory(), realm.getId(), model);
         assertNotNull(result);

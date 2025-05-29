@@ -45,7 +45,7 @@ public class DBUserStorageResource implements RealmResourceProvider {
             return Response.status(Status.BAD_REQUEST).entity("Realm not found").build();
         }
 
-        // Get the provider model - using getComponents() which is compatible with Keycloak 26
+        // Get the provider model
         ComponentModel componentModel = realm.getComponentsStream()
             .filter(component -> component.getId().equals(providerId) && 
                    component.getProviderType().equals(UserStorageProvider.class.getName()))
@@ -57,25 +57,25 @@ public class DBUserStorageResource implements RealmResourceProvider {
             return Response.status(Status.NOT_FOUND).entity("Provider not found").build();
         }
 
-        // Convert ComponentModel to UserStorageProviderModel
-        UserStorageProviderModel model = new UserStorageProviderModel(componentModel);
-
-        // Get the provider instance
-        UserStorageProvider provider = session.getProvider(UserStorageProvider.class, model.getProviderId());
-        if (provider == null) {
-            log.warnv("Provider instance not available for ID: {0}", providerId);
-            return Response.status(Status.NOT_FOUND).entity("Provider instance not found").build();
-        }
-
-        // Check if provider supports synchronization
-        if (!(provider instanceof ImportSynchronization)) {
-            log.warnv("Provider does not support synchronization: {0}", providerId);
-            return Response.status(Status.BAD_REQUEST).entity("Provider does not support synchronization").build();
-        }
-
-        // Execute the synchronization
-        ImportSynchronization sync = (ImportSynchronization) provider;
         try {
+            // Convert to UserStorageProviderModel safely
+            UserStorageProviderModel model = new UserStorageProviderModel(componentModel);
+            
+            // Get the provider instance
+            UserStorageProvider provider = session.getProvider(UserStorageProvider.class, model.getProviderId());
+            if (provider == null) {
+                log.warnv("Provider instance not available for ID: {0}", providerId);
+                return Response.status(Status.NOT_FOUND).entity("Provider instance not found").build();
+            }
+    
+            // Check if provider supports synchronization
+            if (!(provider instanceof ImportSynchronization)) {
+                log.warnv("Provider does not support synchronization: {0}", providerId);
+                return Response.status(Status.BAD_REQUEST).entity("Provider does not support synchronization").build();
+            }
+    
+            // Execute the synchronization
+            ImportSynchronization sync = (ImportSynchronization) provider;
             SynchronizationResult result = sync.sync(session.getKeycloakSessionFactory(), realm.getId(), model);
             log.infov("Synchronization completed for provider {0}: {1} added, {2} updated, {3} failed", 
                     providerId, result.getAdded(), result.getUpdated(), result.getFailed());
