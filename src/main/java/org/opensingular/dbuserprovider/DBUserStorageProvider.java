@@ -328,7 +328,6 @@ public class DBUserStorageProvider implements UserStorageProvider,
                 continue;
             }
 
-            RealmModel realm = session.realms().getRealm(realmId);
             UserModel keycloakUser = this.getUserByUsername(realm, username);
 
             if (keycloakUser == null) {
