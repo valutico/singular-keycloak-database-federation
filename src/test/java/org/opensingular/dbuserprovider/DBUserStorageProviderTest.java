@@ -7,6 +7,8 @@ import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserCredentialModel;
+import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.storage.user.SynchronizationResult;
@@ -42,6 +44,9 @@ public class DBUserStorageProviderTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private org.keycloak.models.UserProvider userProvider;
+
     private DBUserStorageProvider provider;
 
     @Before
@@ -58,6 +63,7 @@ public class DBUserStorageProviderTest {
         } catch (Exception e) {
             fail("Failed to set repository field: " + e.getMessage());
         }
+        when(session.users()).thenReturn(userProvider);
     }
 
     @Test
@@ -122,4 +128,57 @@ public class DBUserStorageProviderTest {
         verify(userRepository).validateCredentials("user123", "password");
     }
     */
+    
+    @Test
+    public void testUpdateCredentialUserLinked() {
+        when(model.getId()).thenReturn("provider-id");
+        UserModel user = mock(UserModel.class);
+        when(user.getFederationLink()).thenReturn("provider-id");
+        when(user.getUsername()).thenReturn("jdoe");
+        UserCredentialModel cred = UserCredentialModel.password("secret");
+        when(userRepository.updateCredentials("jdoe", "secret")).thenReturn(true);
+
+        boolean result = provider.updateCredential(realm, user, cred);
+
+        assertTrue(result);
+        verify(userRepository).updateCredentials("jdoe", "secret");
+    }
+
+    @Test
+    public void testUpdateCredentialUserNotLinked() {
+        when(model.getId()).thenReturn("provider-id");
+        UserModel user = mock(UserModel.class);
+        when(user.getFederationLink()).thenReturn("other-id");
+        when(user.getUsername()).thenReturn("jdoe");
+        UserCredentialModel cred = UserCredentialModel.password("secret");
+
+        boolean result = provider.updateCredential(realm, user, cred);
+
+        assertFalse(result);
+        verify(userRepository, never()).updateCredentials(anyString(), anyString());
+    }
+
+    @Test
+    public void testUnlinkUserWithMatchingFederation() {
+        when(model.getId()).thenReturn("provider-id");
+        UserModel user = mock(UserModel.class);
+        when(userProvider.getUserById(realm, "u1")).thenReturn(user);
+        when(user.getFederationLink()).thenReturn("provider-id");
+
+        provider.unlinkUser(realm, "u1");
+
+        verify(user).setFederationLink(null);
+    }
+
+    @Test
+    public void testUnlinkUserNoMatchingFederation() {
+        when(model.getId()).thenReturn("provider-id");
+        UserModel user = mock(UserModel.class);
+        when(userProvider.getUserById(realm, "u1")).thenReturn(user);
+        when(user.getFederationLink()).thenReturn("other-id");
+
+        provider.unlinkUser(realm, "u1");
+
+        verify(user, never()).setFederationLink(null);
+    }
 }
