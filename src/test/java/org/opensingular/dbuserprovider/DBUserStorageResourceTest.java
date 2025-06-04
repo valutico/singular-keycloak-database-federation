@@ -62,7 +62,7 @@ public class DBUserStorageResourceTest {
         when(realm.getId()).thenReturn(REALM_ID);
         
         // Set up provider instance
-        when(session.getProvider(UserStorageProvider.class, PROVIDER_ID)).thenReturn(provider);
+        when(session.getProvider(eq(UserStorageProvider.class), any(UserStorageProviderModel.class))).thenReturn(provider);
         when(session.getKeycloakSessionFactory()).thenReturn(sessionFactory);
         
         // Setup stream of components
@@ -95,7 +95,7 @@ public class DBUserStorageResourceTest {
         DBUserStorageProvider syncProvider = mock(DBUserStorageProvider.class);
         
         // Set up provider to return our mock
-        when(session.getProvider(UserStorageProvider.class, PROVIDER_ID)).thenReturn(syncProvider);
+        when(session.getProvider(eq(UserStorageProvider.class), any(UserStorageProviderModel.class))).thenReturn(syncProvider);
         
         // Create a result object
         SynchronizationResult result = new SynchronizationResult();

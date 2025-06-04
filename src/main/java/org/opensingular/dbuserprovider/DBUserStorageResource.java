@@ -62,7 +62,7 @@ public class DBUserStorageResource implements RealmResourceProvider {
             UserStorageProviderModel model = new UserStorageProviderModel(componentModel);
             
             // Get the provider instance
-            UserStorageProvider provider = session.getProvider(UserStorageProvider.class, model.getProviderId());
+           UserStorageProvider provider = session.getProvider(UserStorageProvider.class, model);
             if (provider == null) {
                 log.warnv("Provider instance not available for ID: {0}", providerId);
                 return Response.status(Status.NOT_FOUND).entity("Provider instance not found").build();
