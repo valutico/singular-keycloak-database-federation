@@ -316,6 +316,15 @@ public class DBUserStorageProvider implements UserStorageProvider,
             return SynchronizationResult.empty();
         }
 
+        KeycloakSession syncSession = sessionFactory.create();
+        RealmModel realm;
+        try {
+            realm = syncSession.realms().getRealm(realmId);
+            if (realm == null) {
+                log.warnv("Realm not found for ID {0}", realmId);
+                return SynchronizationResult.empty();
+            }
+
         log.info("Starting user synchronization...");
         SynchronizationResult result = SynchronizationResult.empty();
         List<Map<String, String>> usersFromDb = repository.getAllUsersForSync();
@@ -358,6 +367,9 @@ public class DBUserStorageProvider implements UserStorageProvider,
         }
         log.info("User synchronization complete.");
         return result;
+        } finally {
+            syncSession.close();
+        }
     }
 
     @Override
