@@ -166,10 +166,17 @@ public class DBUserStorageProvider implements UserStorageProvider,
     
     @Override
     public UserModel getUserByUsername(RealmModel realm, String username) {
+            return getUserByUsername(this.session, realm, username);
+    }
+
+    private UserModel getUserByUsername(KeycloakSession activeSession, RealmModel realm, String username) {
         
         log.infov("lookup user by username: realm={0} username={1}", realm.getId(), username);
         
-        return repository.findUserByUsername(username).map(u -> new UserAdapter(session, realm, model, u, allowDatabaseToOverwriteKeycloak)).orElse(null);
+
+        return repository.findUserByUsername(username)
+                .map(u -> new UserAdapter(activeSession, realm, model, u, allowDatabaseToOverwriteKeycloak))
+                .orElse(null);
     }
     
     @Override
@@ -256,15 +263,23 @@ public class DBUserStorageProvider implements UserStorageProvider,
      */
     @Override
     public UserModel addUser(RealmModel realm, String username) {
+            return addUser(this.session, realm, username);
+    }
+
+    private UserModel addUser(KeycloakSession activeSession, RealmModel realm, String username) {
         // Look up user in database
         Map<String, String> dbUser = repository.findUserByUsername(username).orElse(null);
         
         if (dbUser == null) {
             return null;
         }
+
+        if (dbUser == null) {
+            return null;
+        }
         
-        // Create new user in Keycloak's local storage
-        UserModel userModel = session.users().addUser(realm, username);
+        UserModel userModel = activeSession.users().addUser(realm, username);
+
         
         // Set basic attributes
         userModel.setEnabled(true);
@@ -316,6 +331,14 @@ public class DBUserStorageProvider implements UserStorageProvider,
             return SynchronizationResult.empty();
         }
 
+        KeycloakSession syncSession = sessionFactory.create();
+        RealmModel realm = syncSession.realms().getRealm(realmId);
+        if (realm == null) {
+            log.warnv("Realm not found for ID {0}", realmId);
+            syncSession.close();
+            return SynchronizationResult.empty();
+        }
+
         log.info("Starting user synchronization...");
         SynchronizationResult result = SynchronizationResult.empty();
         List<Map<String, String>> usersFromDb = repository.getAllUsersForSync();
@@ -328,11 +351,11 @@ public class DBUserStorageProvider implements UserStorageProvider,
                 continue;
             }
 
-            UserModel keycloakUser = this.getUserByUsername(realm, username);
+            UserModel keycloakUser = this.getUserByUsername(syncSession, realm, username);
 
             if (keycloakUser == null) {
                 log.infov("User {0} not found in Keycloak, creating...", username);
-                keycloakUser = this.addUser(realm, username);
+                keycloakUser = this.addUser(syncSession, realm, username);
                 if (keycloakUser == null) {
                     log.errorv("Failed to add user {0} to Keycloak.", username);
                     result.increaseFailed();
@@ -357,6 +380,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
             }
         }
         log.info("User synchronization complete.");
+        syncSession.close();
         return result;
     }
 
