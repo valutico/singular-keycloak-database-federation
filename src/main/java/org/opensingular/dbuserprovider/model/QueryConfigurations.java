@@ -18,8 +18,10 @@ public class QueryConfigurations {
     private final boolean allowDatabaseToOverwriteKeycloak;
     private final boolean syncEnabled;
     private final String listAllForSync;
+    private final boolean syncPasswords;
+    private final String listAllForSyncWithPasswords;
 
-    public QueryConfigurations(String count, String listAll, String findById, String findByUsername, String findByEmail, String findBySearchTerm, String findPasswordHash, String hashFunction, RDBMS RDBMS, boolean allowKeycloakDelete, boolean allowDatabaseToOverwriteKeycloak, boolean syncEnabled, String listAllForSync) {
+    public QueryConfigurations(String count, String listAll, String findById, String findByUsername, String findByEmail, String findBySearchTerm, String findPasswordHash, String hashFunction, RDBMS RDBMS, boolean allowKeycloakDelete, boolean allowDatabaseToOverwriteKeycloak, boolean syncEnabled, String listAllForSync, boolean syncPasswords, String listAllForSyncWithPasswords) {
         this.count = count;
         this.listAll = listAll;
         this.findById = findById;
@@ -34,6 +36,8 @@ public class QueryConfigurations {
         this.allowDatabaseToOverwriteKeycloak = allowDatabaseToOverwriteKeycloak;
         this.syncEnabled = syncEnabled;
         this.listAllForSync = listAllForSync;
+        this.syncPasswords = syncPasswords;
+        this.listAllForSyncWithPasswords = listAllForSyncWithPasswords;
     }
 
     public RDBMS getRDBMS() {
@@ -98,5 +102,13 @@ public class QueryConfigurations {
     
     public String getListAllForSync() {
         return listAllForSync;
+    }
+    
+    public boolean isSyncPasswords() {
+        return syncPasswords;
+    }
+    
+    public String getListAllForSyncWithPasswords() {
+        return listAllForSyncWithPasswords;
     }
 }

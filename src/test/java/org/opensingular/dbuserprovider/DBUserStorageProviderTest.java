@@ -71,6 +71,9 @@ public class DBUserStorageProviderTest {
         when(session.users()).thenReturn(userProvider);
         when(session.getKeycloakSessionFactory()).thenReturn(sessionFactory);
         
+        // Mock realm ID
+        when(realm.getId()).thenReturn("test-realm-id");
+        
         // Mock session factory to return our sync session
         when(sessionFactory.create()).thenReturn(syncSession);
         when(syncSession.realms()).thenReturn(realmProvider);
@@ -92,11 +95,20 @@ public class DBUserStorageProviderTest {
             super(session, model, dataSourceProvider, queryConfigurations);
             // Set the repository directly instead of creating a new one
             try {
-                java.lang.reflect.Field field = DBUserStorageProvider.class.getDeclaredField("repository");
-                field.setAccessible(true);
-                field.set(this, userRepository);
+                java.lang.reflect.Field repositoryField = DBUserStorageProvider.class.getDeclaredField("repository");
+                repositoryField.setAccessible(true);
+                repositoryField.set(this, userRepository);
+                
+                // Also need to update the boolean fields that are cached from queryConfigurations
+                java.lang.reflect.Field syncEnabledField = DBUserStorageProvider.class.getDeclaredField("syncEnabled");
+                syncEnabledField.setAccessible(true);
+                syncEnabledField.set(this, queryConfigurations.isSyncEnabled());
+                
+                java.lang.reflect.Field syncPasswordsField = DBUserStorageProvider.class.getDeclaredField("syncPasswords");
+                syncPasswordsField.setAccessible(true);
+                syncPasswordsField.set(this, queryConfigurations.isSyncPasswords());
             } catch (Exception e) {
-                throw new RuntimeException("Failed to inject repository for testing", e);
+                throw new RuntimeException("Failed to inject dependencies for testing", e);
             }
         }
     }
@@ -264,6 +276,44 @@ public class DBUserStorageProviderTest {
         assertEquals(0, result.getAdded());
         assertEquals(0, result.getUpdated());
         assertEquals(0, result.getFailed());
+    }
+
+    @Test
+    public void testSyncPasswordsDisabledByDefault() {
+        // Set up mocks before creating the provider
+        when(queryConfigurations.isSyncEnabled()).thenReturn(true);
+        when(queryConfigurations.isSyncPasswords()).thenReturn(false);
+        when(queryConfigurations.getAllowDatabaseToOverwriteKeycloak()).thenReturn(false);
+        when(userRepository.getAllUsersForSync()).thenReturn(java.util.Collections.emptyList());
+        
+        // Re-create provider with mocked configurations
+        provider = new TestableDBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations, userRepository);
+
+        SynchronizationResult result = provider.sync(sessionFactory, realm.getId(), model);
+        
+        assertNotNull(result);
+        // Verify that regular sync method was called, not the password sync method
+        verify(userRepository).getAllUsersForSync();
+        verify(userRepository, never()).getAllUsersForSyncWithPasswords();
+    }
+
+    @Test
+    public void testSyncPasswordsEnabled() {
+        // Set up mocks before creating the provider
+        when(queryConfigurations.isSyncEnabled()).thenReturn(true);
+        when(queryConfigurations.isSyncPasswords()).thenReturn(true);
+        when(queryConfigurations.getAllowDatabaseToOverwriteKeycloak()).thenReturn(false);
+        when(userRepository.getAllUsersForSyncWithPasswords()).thenReturn(java.util.Collections.emptyList());
+        
+        // Re-create provider with mocked configurations
+        provider = new TestableDBUserStorageProvider(session, model, dataSourceProvider, queryConfigurations, userRepository);
+
+        SynchronizationResult result = provider.sync(sessionFactory, realm.getId(), model);
+        
+        assertNotNull(result);
+        // Verify that password sync method was called
+        verify(userRepository).getAllUsersForSyncWithPasswords();
+        verify(userRepository, never()).getAllUsersForSync();
     }
 
     // Note: Complex sync scenario tests removed due to mocking complexity.

@@ -78,7 +78,9 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                 model.get("allowKeycloakDelete", false),
                 model.get("allowDatabaseToOverwriteKeycloak", false),
                 model.get("syncEnabled", false),
-                model.get("listAllForSync", model.get("listAll"))
+                model.get("listAllForSync", model.get("listAll")),
+                model.get("syncPasswords", false),
+                model.get("listAllForSyncWithPasswords", model.get("listAllForSync", model.get("listAll")))
         );
         return providerConfig;
     }
@@ -160,6 +162,13 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue("false")
                 .add()
+                .property()
+                .name("syncPasswords")
+                .label("Sync Password Hashes")
+                .helpText("Copy password hashes from external database to Keycloak during sync (enables authentication after unlinking)")
+                .type(ProviderConfigProperty.BOOLEAN_TYPE)
+                .defaultValue("false")
+                .add()
                 
                 // Query configurations
                 .property()
@@ -182,6 +191,13 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
                 .helpText(DEFAULT_HELP_TEXT + " Used for user synchronization")
                 .type(ProviderConfigProperty.STRING_TYPE)
                 .defaultValue("")
+                .add()
+                .property()
+                .name("listAllForSyncWithPasswords")
+                .label("List All Users SQL query (for sync with passwords)")
+                .helpText(DEFAULT_HELP_TEXT + " Used for user synchronization with password hashes. Include password_hash column.")
+                .type(ProviderConfigProperty.STRING_TYPE)
+                .defaultValue("select id, username, email, firstName, lastName, password_hash from users")
                 .add()
                 .property()
                 .name("findById")

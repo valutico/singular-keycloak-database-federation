@@ -100,6 +100,29 @@ src/test/java/
 - **Build Output**: `dist/` directory contains JAR and dependencies
 - **Test Framework**: JUnit 4.13.2 with Mockito 5.11.0
 
+## Password Synchronization Feature
+
+The provider supports synchronizing password hashes from the external database to Keycloak's user store, enabling users to authenticate against Keycloak even after federation unlinking.
+
+### Configuration Options
+
+- **Sync Passwords**: Enable copying password hashes during user synchronization
+- **Sync Query with Passwords**: Custom SQL query that includes `password_hash` column
+- **Supported Hash Format**: BCrypt (Blowfish) with `$2a$`, `$2b$`, or `$2y$` prefixes
+
+### Use Cases
+
+1. **Federation Migration**: Gradually migrate users from external authentication to Keycloak
+2. **Backup Authentication**: Provide fallback authentication when external system is unavailable
+3. **User Unlinking**: Allow users to continue authenticating after removing federation link
+
+### Security Considerations
+
+- Password hashes are copied, not plain-text passwords
+- Only BCrypt format is supported for security
+- Existing Keycloak credentials are replaced during sync
+- Database access controls should protect password hash columns
+
 ## Development Notes
 
 - Uses Google AutoService for automatic SPI registration

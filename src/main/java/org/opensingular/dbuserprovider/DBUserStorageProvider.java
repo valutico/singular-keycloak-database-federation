@@ -37,6 +37,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
     private final UserRepository repository;
     private final boolean allowDatabaseToOverwriteKeycloak;
     private final boolean syncEnabled;
+    private final boolean syncPasswords;
 
     DBUserStorageProvider(KeycloakSession session, UserStorageProviderModel model, DataSourceProvider dataSourceProvider, QueryConfigurations queryConfigurations) {
         this.session = session;
@@ -44,6 +45,7 @@ public class DBUserStorageProvider implements UserStorageProvider,
         this.repository = new UserRepository(dataSourceProvider, queryConfigurations);
         this.allowDatabaseToOverwriteKeycloak = queryConfigurations.getAllowDatabaseToOverwriteKeycloak();
         this.syncEnabled = queryConfigurations.isSyncEnabled();
+        this.syncPasswords = queryConfigurations.isSyncPasswords();
     }
     
     
@@ -341,7 +343,12 @@ public class DBUserStorageProvider implements UserStorageProvider,
             
             List<Map<String, String>> usersFromDb;
             try {
-                usersFromDb = repository.getAllUsersForSync();
+                if (syncPasswords) {
+                    log.infov("Sync with passwords enabled - retrieving users with password hashes");
+                    usersFromDb = repository.getAllUsersForSyncWithPasswords();
+                } else {
+                    usersFromDb = repository.getAllUsersForSync();
+                }
             } catch (Exception e) {
                 log.errorv(e, "Failed to retrieve users from database for sync");
                 return SynchronizationResult.empty();
@@ -368,6 +375,12 @@ public class DBUserStorageProvider implements UserStorageProvider,
                         }
                         keycloakUser.setFederationLink(model.getId());
                         mapUserAttributes(keycloakUser, dbUserMap);
+                        
+                        // Sync password if enabled
+                        if (syncPasswords) {
+                            syncUserPassword(syncSession, realm, keycloakUser, dbUserMap);
+                        }
+                        
                         result.increaseAdded();
                         log.infov("User {0} created in Keycloak.", username);
                     } else {
@@ -377,6 +390,12 @@ public class DBUserStorageProvider implements UserStorageProvider,
                                 keycloakUser.setFederationLink(model.getId());
                             }
                             mapUserAttributes(keycloakUser, dbUserMap);
+                            
+                            // Sync password if enabled
+                            if (syncPasswords) {
+                                syncUserPassword(syncSession, realm, keycloakUser, dbUserMap);
+                            }
+                            
                             result.increaseUpdated();
                             log.infov("User {0} updated in Keycloak.", username);
                         } else {
@@ -418,5 +437,54 @@ public class DBUserStorageProvider implements UserStorageProvider,
         keycloakUser.setFirstName(dbUserMap.get("firstName"));
         keycloakUser.setLastName(dbUserMap.get("lastName"));
         // Add any other attribute mappings here if needed
+    }
+    
+    /**
+     * Synchronizes password hash from database to Keycloak user store
+     */
+    private void syncUserPassword(KeycloakSession session, RealmModel realm, UserModel user, Map<String, String> dbUserMap) {
+        String passwordHash = dbUserMap.get("password_hash");
+        if (passwordHash == null || passwordHash.trim().isEmpty()) {
+            log.debugv("No password hash found for user {0}, skipping password sync", user.getUsername());
+            return;
+        }
+        
+        try {
+            // Validate bcrypt hash format
+            if (!passwordHash.startsWith("$2a$") && !passwordHash.startsWith("$2b$") && !passwordHash.startsWith("$2y$")) {
+                log.warnv("Password hash for user {0} is not in bcrypt format, skipping password sync", user.getUsername());
+                return;
+            }
+            
+            // In Keycloak 26, use user.credentialManager() instead of session.userCredentialManager()
+            // Remove existing password credentials to avoid conflicts
+            user.credentialManager()
+                .getStoredCredentialsByTypeStream(PasswordCredentialModel.TYPE)
+                .forEach(cred -> {
+                    try {
+                        user.credentialManager().removeStoredCredentialById(cred.getId());
+                        log.debugv("Removed existing password credential for user {0}", user.getUsername());
+                    } catch (Exception e) {
+                        log.warnv(e, "Failed to remove existing password credential for user {0}", user.getUsername());
+                    }
+                });
+            
+            // Create password credential using the bcrypt hash
+            // Use the correct createFromValues signature for Keycloak 26
+            PasswordCredentialModel passwordCredential = PasswordCredentialModel.createFromValues(
+                "bcrypt",                    // algorithm
+                null,                        // salt (null for bcrypt as salt is embedded in hash)
+                1,                          // hashIterations (bcrypt uses cost factor, not iterations)
+                passwordHash                 // encodedPassword (the full bcrypt hash)
+            );
+            
+            // Store the credential in Keycloak
+            user.credentialManager().createStoredCredential(passwordCredential);
+            
+            log.infov("Successfully synced password hash for user {0}", user.getUsername());
+            
+        } catch (Exception e) {
+            log.errorv(e, "Failed to sync password for user {0}: {1}", user.getUsername(), e.getMessage());
+        }
     }
 }
