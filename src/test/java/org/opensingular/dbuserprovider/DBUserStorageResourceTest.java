@@ -111,4 +111,89 @@ public class DBUserStorageResourceTest {
         assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
         verify(syncProvider).sync(eq(sessionFactory), eq(REALM_ID), any(UserStorageProviderModel.class));
     }
+
+    @Test
+    public void testSyncWithException() {
+        // Create a mock that implements both interfaces
+        DBUserStorageProvider syncProvider = mock(DBUserStorageProvider.class);
+        
+        // Set up provider to return our mock
+        when(session.getProvider(eq(UserStorageProvider.class), any(UserStorageProviderModel.class))).thenReturn(syncProvider);
+        
+        // Set up the sync method to throw an exception
+        when(syncProvider.sync(any(KeycloakSessionFactory.class), eq(REALM_ID), any(UserStorageProviderModel.class)))
+            .thenThrow(new RuntimeException("Sync failed"));
+        
+        // Call the method under test
+        Response response = resource.sync(PROVIDER_ID);
+        
+        // Verify the result
+        assertEquals(Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(), response.getStatus());
+    }
+
+    @Test
+    public void testSyncWithNullRealm() {
+        // Set up realm context to return null
+        when(session.getContext()).thenReturn(context);
+        when(context.getRealm()).thenReturn(null);
+        
+        // Call the method under test
+        Response response = resource.sync(PROVIDER_ID);
+        
+        // Verify the result
+        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+    }
+
+    @Test
+    public void testSyncWithProviderInstanceNotFound() {
+        // Set up provider to return null
+        when(session.getProvider(eq(UserStorageProvider.class), any(UserStorageProviderModel.class))).thenReturn(null);
+        
+        // Call the method under test
+        Response response = resource.sync(PROVIDER_ID);
+        
+        // Verify the result
+        assertEquals(Response.Status.NOT_FOUND.getStatusCode(), response.getStatus());
+    }
+
+    @Test
+    public void testSyncProviderEndpoint() {
+        // Create a mock that implements both interfaces
+        DBUserStorageProvider syncProvider = mock(DBUserStorageProvider.class);
+        
+        // Set up provider to return our mock
+        when(session.getProvider(eq(UserStorageProvider.class), any(UserStorageProviderModel.class))).thenReturn(syncProvider);
+        
+        // Create a result object
+        SynchronizationResult result = new SynchronizationResult();
+        
+        // Set up the sync method to return our result
+        when(syncProvider.sync(any(KeycloakSessionFactory.class), eq(REALM_ID), any(UserStorageProviderModel.class)))
+            .thenReturn(result);
+        
+        // Call the syncProvider method directly
+        Response response = resource.syncProvider(PROVIDER_ID);
+        
+        // Verify the result
+        assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+        verify(syncProvider).sync(eq(sessionFactory), eq(REALM_ID), any(UserStorageProviderModel.class));
+    }
+
+    @Test
+    public void testSyncWithEmptyProviderId() {
+        // Call the method with empty provider ID
+        Response response = resource.sync("");
+        
+        // Verify the result
+        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+    }
+
+    @Test
+    public void testSyncWithNullProviderId() {
+        // Call the method with null provider ID
+        Response response = resource.sync(null);
+        
+        // Verify the result
+        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+    }
 }

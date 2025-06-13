@@ -271,15 +271,11 @@ public class DBUserStorageProvider implements UserStorageProvider,
         Map<String, String> dbUser = repository.findUserByUsername(username).orElse(null);
         
         if (dbUser == null) {
-            return null;
-        }
-
-        if (dbUser == null) {
+            log.warnv("User {0} not found in database, cannot add to Keycloak", username);
             return null;
         }
         
         UserModel userModel = activeSession.users().addUser(realm, username);
-
         
         // Set basic attributes
         userModel.setEnabled(true);
@@ -331,57 +327,82 @@ public class DBUserStorageProvider implements UserStorageProvider,
             return SynchronizationResult.empty();
         }
 
-        KeycloakSession syncSession = sessionFactory.create();
-        RealmModel realm = syncSession.realms().getRealm(realmId);
-        if (realm == null) {
-            log.warnv("Realm not found for ID {0}", realmId);
-            syncSession.close();
-            return SynchronizationResult.empty();
-        }
-
-        log.info("Starting user synchronization...");
-        SynchronizationResult result = SynchronizationResult.empty();
-        List<Map<String, String>> usersFromDb = repository.getAllUsersForSync();
-
-        for (Map<String, String> dbUserMap : usersFromDb) {
-            String username = dbUserMap.get("username");
-            if (username == null) {
-                log.warnv("User from DB is missing username: {0}", dbUserMap);
-                result.increaseFailed();
-                continue;
+        KeycloakSession syncSession = null;
+        try {
+            syncSession = sessionFactory.create();
+            RealmModel realm = syncSession.realms().getRealm(realmId);
+            if (realm == null) {
+                log.warnv("Realm not found for ID {0}", realmId);
+                return SynchronizationResult.empty();
             }
 
-            UserModel keycloakUser = this.getUserByUsername(syncSession, realm, username);
+            log.info("Starting user synchronization...");
+            SynchronizationResult result = SynchronizationResult.empty();
+            
+            List<Map<String, String>> usersFromDb;
+            try {
+                usersFromDb = repository.getAllUsersForSync();
+            } catch (Exception e) {
+                log.errorv(e, "Failed to retrieve users from database for sync");
+                return SynchronizationResult.empty();
+            }
 
-            if (keycloakUser == null) {
-                log.infov("User {0} not found in Keycloak, creating...", username);
-                keycloakUser = this.addUser(syncSession, realm, username);
-                if (keycloakUser == null) {
-                    log.errorv("Failed to add user {0} to Keycloak.", username);
-                    result.increaseFailed();
-                    continue;
-                }
-                keycloakUser.setFederationLink(model.getId());
-                mapUserAttributes(keycloakUser, dbUserMap);
-                result.increaseAdded();
-                log.infov("User {0} created in Keycloak.", username);
-            } else {
-                if (allowDatabaseToOverwriteKeycloak) {
-                    log.infov("User {0} found in Keycloak, updating attributes...", username);
-                    if (!model.getId().equals(keycloakUser.getFederationLink())) {
-                        keycloakUser.setFederationLink(model.getId());
+            for (Map<String, String> dbUserMap : usersFromDb) {
+                try {
+                    String username = dbUserMap.get("username");
+                    if (username == null || username.trim().isEmpty()) {
+                        log.warnv("User from DB is missing or empty username: {0}", dbUserMap);
+                        result.increaseFailed();
+                        continue;
                     }
-                    mapUserAttributes(keycloakUser, dbUserMap);
-                    result.increaseUpdated();
-                    log.infov("User {0} updated in Keycloak.", username);
-                } else {
-                    log.infov("User {0} found in Keycloak, but overwrite is disabled.", username);
+
+                    UserModel keycloakUser = syncSession.users().getUserByUsername(realm, username);
+
+                    if (keycloakUser == null) {
+                        log.infov("User {0} not found in Keycloak, creating...", username);
+                        keycloakUser = this.addUser(syncSession, realm, username);
+                        if (keycloakUser == null) {
+                            log.errorv("Failed to add user {0} to Keycloak.", username);
+                            result.increaseFailed();
+                            continue;
+                        }
+                        keycloakUser.setFederationLink(model.getId());
+                        mapUserAttributes(keycloakUser, dbUserMap);
+                        result.increaseAdded();
+                        log.infov("User {0} created in Keycloak.", username);
+                    } else {
+                        if (allowDatabaseToOverwriteKeycloak) {
+                            log.infov("User {0} found in Keycloak, updating attributes...", username);
+                            if (!model.getId().equals(keycloakUser.getFederationLink())) {
+                                keycloakUser.setFederationLink(model.getId());
+                            }
+                            mapUserAttributes(keycloakUser, dbUserMap);
+                            result.increaseUpdated();
+                            log.infov("User {0} updated in Keycloak.", username);
+                        } else {
+                            log.infov("User {0} found in Keycloak, but overwrite is disabled.", username);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.errorv(e, "Error processing user during sync: {0}", dbUserMap.get("username"));
+                    result.increaseFailed();
+                }
+            }
+            log.infov("User synchronization complete. Added: {0}, Updated: {1}, Failed: {2}", 
+                     result.getAdded(), result.getUpdated(), result.getFailed());
+            return result;
+        } catch (Exception e) {
+            log.errorv(e, "Unexpected error during user synchronization");
+            return SynchronizationResult.empty();
+        } finally {
+            if (syncSession != null) {
+                try {
+                    syncSession.close();
+                } catch (Exception e) {
+                    log.warnv(e, "Error closing sync session");
                 }
             }
         }
-        log.info("User synchronization complete.");
-        syncSession.close();
-        return result;
     }
 
     @Override

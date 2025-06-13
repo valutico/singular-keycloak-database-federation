@@ -1,11 +1,11 @@
 {
     "name": "Keycloak 24 Dev Environment",
     "build": {
-      "dockerfile": "Dockerfile"
+      "dockerfile": "Dockerfile",
       // You can pass arguments to your Dockerfile if needed
-      // "args": {
-      //   "MAVEN_VERSION": "3.9.6"
-      // }
+       "args": {
+         "MAVEN_VERSION": "3.9.10"
+       }
     },
     "customizations": {
       "vscode": {

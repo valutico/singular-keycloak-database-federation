@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/devcontainers/java:1-21-bullseye
 
 # Arguments for Maven version - can be overridden in devcontainer.json
-ARG MAVEN_VERSION=3.9.6
+ARG MAVEN_VERSION=3.9.10
 ARG USER_HOME_DIR=/home/vscode # Default for vscode user in Microsoft devcontainer images
 ARG SHA=6e9da326bd371b26a4a25693a62996309a81897aac0a5390c43e994d55018d8817d458971401b071779096910070700218b05085c900e6803631637177100bf3 # SHA512 for Maven 3.9.6 binary tar.gz
 
