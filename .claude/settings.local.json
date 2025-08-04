@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "WebFetch(domain:www.keycloak.org)",
+      "Bash(mvn test:*)"
+    ],
+    "deny": []
+  }
+}

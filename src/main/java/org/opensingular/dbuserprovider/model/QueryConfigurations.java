@@ -16,8 +16,12 @@ public class QueryConfigurations {
     private final RDBMS  RDBMS;
     private final boolean allowKeycloakDelete;
     private final boolean allowDatabaseToOverwriteKeycloak;
+    private final boolean syncEnabled;
+    private final String listAllForSync;
+    private final boolean syncPasswords;
+    private final String listAllForSyncWithPasswords;
 
-    public QueryConfigurations(String count, String listAll, String findById, String findByUsername, String findByEmail, String findBySearchTerm, String findPasswordHash, String hashFunction, RDBMS RDBMS, boolean allowKeycloakDelete, boolean allowDatabaseToOverwriteKeycloak) {
+    public QueryConfigurations(String count, String listAll, String findById, String findByUsername, String findByEmail, String findBySearchTerm, String findPasswordHash, String hashFunction, RDBMS RDBMS, boolean allowKeycloakDelete, boolean allowDatabaseToOverwriteKeycloak, boolean syncEnabled, String listAllForSync, boolean syncPasswords, String listAllForSyncWithPasswords) {
         this.count = count;
         this.listAll = listAll;
         this.findById = findById;
@@ -30,6 +34,10 @@ public class QueryConfigurations {
         this.RDBMS = RDBMS;
         this.allowKeycloakDelete = allowKeycloakDelete;
         this.allowDatabaseToOverwriteKeycloak = allowDatabaseToOverwriteKeycloak;
+        this.syncEnabled = syncEnabled;
+        this.listAllForSync = listAllForSync;
+        this.syncPasswords = syncPasswords;
+        this.listAllForSyncWithPasswords = listAllForSyncWithPasswords;
     }
 
     public RDBMS getRDBMS() {
@@ -86,5 +94,21 @@ public class QueryConfigurations {
 
     public boolean getAllowDatabaseToOverwriteKeycloak() {
         return allowDatabaseToOverwriteKeycloak;
+    }
+
+    public boolean isSyncEnabled() {
+        return syncEnabled;
+    }
+    
+    public String getListAllForSync() {
+        return listAllForSync;
+    }
+    
+    public boolean isSyncPasswords() {
+        return syncPasswords;
+    }
+    
+    public String getListAllForSyncWithPasswords() {
+        return listAllForSyncWithPasswords;
     }
 }

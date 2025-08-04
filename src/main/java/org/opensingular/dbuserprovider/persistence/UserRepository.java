@@ -206,4 +206,38 @@ public class UserRepository {
     public boolean removeUser() {
         return queryConfigurations.getAllowKeycloakDelete();
     }
+    
+    public List<Map<String, String>> getAllUsersForSync() {
+        log.infov("Getting all users for sync using query: {0}", queryConfigurations.getListAllForSync());
+        return doQuery(queryConfigurations.getListAllForSync(), null, this::readMap);
+    }
+    
+    public List<Map<String, String>> getAllUsersForSyncWithPasswords() {
+        log.infov("Getting all users for sync with passwords using query: {0}", queryConfigurations.getListAllForSyncWithPasswords());
+        return doQuery(queryConfigurations.getListAllForSyncWithPasswords(), null, this::readMapWithPassword);
+    }
+    
+    private List<Map<String, String>> readMapWithPassword(ResultSet rs) {
+        try {
+            List<Map<String, String>> data = new ArrayList<>();
+            Set<String> columnsFound = new HashSet<>();
+            
+            // Get all column names including password_hash if present
+            for (int i = 1; i <= rs.getMetaData().getColumnCount(); i++) {
+                String columnLabel = rs.getMetaData().getColumnLabel(i);
+                columnsFound.add(columnLabel);
+            }
+            
+            while (rs.next()) {
+                Map<String, String> result = new HashMap<>();
+                for (String col : columnsFound) {
+                    result.put(col, rs.getString(col));
+                }
+                data.add(result);
+            }
+            return data;
+        } catch (Exception e) {
+            throw new DBUserStorageException(e.getMessage(), e);
+        }
+    }
 }
