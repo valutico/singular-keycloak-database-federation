@@ -85,9 +85,50 @@ public class DBUserStorageProviderFactory implements UserStorageProviderFactory<
         return providerConfig;
     }
     
+    private synchronized ProviderConfig configureFromComponentModel(ComponentModel model) {
+        log.infov("Creating configuration for ComponentModel: id={0} name={1}", model.getId(), model.getName());
+        ProviderConfig providerConfig = new ProviderConfig();
+        String user = model.get("user");
+        String password = model.get("password");
+        String url = model.get("url");
+        RDBMS rdbms = RDBMS.getByDescription(model.get("rdbms"));
+        
+        providerConfig.dataSourceProvider.configure(url, rdbms, user, password, model.getName());
+        providerConfig.queryConfigurations = new QueryConfigurations(
+                model.get("count"),
+                model.get("listAll"),
+                model.get("findById"),
+                model.get("findByUsername"),
+                model.get("findByEmail"),
+                model.get("findBySearchTerm"),
+                model.get("findPasswordHash"),
+                model.get("hashFunction"),
+                rdbms,
+                getBooleanConfig(model, "allowKeycloakDelete", false),
+                getBooleanConfig(model, "allowDatabaseToOverwriteKeycloak", false),
+                getBooleanConfig(model, "syncEnabled", false),
+                model.get("listAllForSync", model.get("listAll")),
+                getBooleanConfig(model, "syncPasswords", false),
+                model.get("listAllForSyncWithPasswords", model.get("listAllForSync", model.get("listAll")))
+        );
+        return providerConfig;
+    }
+    
+    private boolean getBooleanConfig(ComponentModel model, String key, boolean defaultValue) {
+        String value = model.get(key);
+        return value != null ? Boolean.parseBoolean(value) : defaultValue;
+    }
+    
     @Override
     public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model) throws ComponentValidationException {
-        validateConfiguration(session, realm, (UserStorageProviderModel) model);
+        try {
+            ProviderConfig old = providerConfigPerInstance.put(model.getId(), configureFromComponentModel(model));
+            if (old != null) {
+                old.dataSourceProvider.close();
+            }
+        } catch (Exception e) {
+            throw new ComponentValidationException(e.getMessage(), e);
+        }
     }
     
     public void validateConfiguration(KeycloakSession session, RealmModel realm, UserStorageProviderModel model) throws ComponentValidationException {
